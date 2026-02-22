@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { hexToBytes, keccak256, encodePacked } from "viem";
+import { hexToBytes, keccak256, encodePacked, pad } from "viem";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS } from "../utils/constants";
 
@@ -11,6 +11,7 @@ interface FormData {
   urgencyLevel: string;
   description: string;
   effortHours: number;
+  peopleHelped: number;  // FIX: was hardcoded to 4
   latitude: number;
   longitude: number;
   povertyIndex: number;
@@ -69,61 +70,86 @@ export default function SubmitImpactForm() {
       await new Promise((r) => setTimeout(r, 1500));
       const mockCID = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 
-      // Step 2: Call SATIN Oracle
-      setStep("oracle");
-      const oracleResponse = await fetch(`${process.env.NEXT_PUBLIC_ORACLE_URL}/evaluate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-SATIN-API-Key": process.env.NEXT_PUBLIC_SATIN_API_KEY || "dev-key-apex-humanity",
-        },
-        body: JSON.stringify({
-          volunteer_address: address,
-          beneficiary_zkp_hash: keccak256(encodePacked(["address", "uint256"], [address as `0x${string}`, BigInt(Date.now())])).slice(2),
-          action_type: form.actionType,
-          urgency_level: form.urgencyLevel,
-          description: form.description,
-          effort_hours: form.effortHours,
-          gps: {
-            latitude: form.latitude,
-            longitude: form.longitude,
-            accuracy_meters: 10,
+      // --- Step 2: Call SATIN Oracle ---
+setStep("oracle");
+const beneficiaryForSigning = address as string;
+      // Convert image to base64 if selected
+      let image_base64: string | null = null;
+      if (selectedFile) {
+        image_base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsDataURL(selectedFile);
+        });
+      }
+
+      const oracleResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_ORACLE_URL}/api/v1/verify`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-APEX-Oracle-Key": process.env.NEXT_PUBLIC_SATIN_API_KEY || "apex-dev-key-change-in-prod",
           },
-          poverty_index: form.povertyIndex,
-          ipfs_media_cid: mockCID,
-        }),
-      });
+          body: JSON.stringify({
+            ipfs_cid:            mockCID,
+            evidence_type:       selectedFile ? "image" : "text",
+            hash_sha256:         "a".repeat(64),
+            gps: {
+              latitude:        form.latitude,
+              longitude:       form.longitude,
+              accuracy_meters: 10.0,
+            },
+            action_type:         form.actionType,
+            people_helped:       form.peopleHelped ?? 10,
+            urgency_level:       form.urgencyLevel,
+            effort_hours:        form.effortHours,
+            volunteer_address:   address,
+            beneficiary_address: beneficiaryForSigning,
+            country_iso:         "ID",
+            description:         form.description,
+            image_base64:        image_base64,
+          }),
+        }
+      );
 
-      // For demo, simulate oracle success
-      const mockOracle = {
-        event_id: crypto.randomUUID(),
-        verification_status: "VERIFIED",
-        impact_score: 78.5,
-        ai_confidence: 0.89,
-        event_hash: "3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b",
-        oracle_signature: "0x" + "a".repeat(130),
-        oracle_payload: {
-          abi_encoded_message: "0x" + "b".repeat(256),
-        },
-      };
+if (!oracleResponse.ok) {
+  const errorData = await oracleResponse.json();
+  throw new Error(errorData.detail || "Oracle verification failed");
+}
 
-      setOracleResult(mockOracle);
+const realOracle = await oracleResponse.json(); 
+setOracleResult(realOracle);
 
-      // Step 3: Submit on-chain
-      setStep("onchain");
-      const hash = await writeContractAsync({
-        address: CONTRACTS.BENEVOLENCE_VAULT as `0x${string}`,
-        abi: BENEVOLENCE_VAULT_ABI,
-        functionName: "submitVerifiedImpact",
-        args: [
-          `0x${mockOracle.event_hash}` as `0x${string}`,
-          address as `0x${string}`,
-          `0x${"0".repeat(64)}` as `0x${string}`,
-          BigInt(Math.round(mockOracle.impact_score * 100)),
-          form.actionType,
-          mockOracle.oracle_signature as `0x${string}`,
-        ],
-      });
+// --- Step 3: Submit on-chain ---
+setStep("onchain");
+
+const ca = realOracle.contract_args;
+// const beneficiaryAddr = realOracle.beneficiary_address || address;
+if (!address || !CONTRACTS.BENEVOLENCE_VAULT) {
+  throw new Error("Wallet not connected or Contract Address missing");
+}
+console.log("Check Addresses:", { wallet: address, contract: CONTRACTS.BENEVOLENCE_VAULT, beneficiary: realOracle.beneficiary_address })
+const hash = await writeContractAsync({
+  address: CONTRACTS.BENEVOLENCE_VAULT as `0x${string}`,
+  abi: BENEVOLENCE_VAULT_ABI,
+  functionName: "releaseReward",
+  args: [
+    pad(`0x${realOracle.event_id.replace(/-/g, '')}` as `0x${string}`, { size: 32 }),
+    address as `0x${string}`,
+    (ca.beneficiaryAddress ?? beneficiaryForSigning) as `0x${string}`, // exact dari oracle
+    BigInt(ca.impactScoreScaled),   // ← exact integer dari oracle, bukan hitung ulang
+    BigInt(ca.tokenRewardWei),      // ← exact wei dari oracle, bukan float * 10**18
+    pad(`0x${realOracle.zk_proof_hash.replace('0x', '')}` as `0x${string}`, { size: 32 }),
+    pad(`0x${realOracle.event_hash.replace('0x', '')}` as `0x${string}`, { size: 32 }),
+    realOracle.nonce,
+    BigInt(realOracle.expires_at),
+    Number(realOracle.signature.v),
+    realOracle.signature.r as `0x${string}`,
+    realOracle.signature.s as `0x${string}`,
+  ],
+});
 
       setTxHash(hash);
       setStep("success");
@@ -147,11 +173,11 @@ export default function SubmitImpactForm() {
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">AI Confidence</span>
-              <span className="text-indigo-400">{(oracleResult.ai_confidence * 100).toFixed(1)}%</span>
+              <span className="text-indigo-400">{((oracleResult?.ai_confidence || 0) * 100).toFixed(1)}%</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">GOOD Tokens Earned</span>
-              <span className="text-yellow-400">~{Math.round(oracleResult.impact_score * 10)} GOOD</span>
+              <span className="text-yellow-400">~{(oracleResult.token_reward).toFixed(2)}</span>
             </div>
           </div>
         )}
@@ -263,6 +289,26 @@ export default function SubmitImpactForm() {
             onChange={(e) => setForm((f) => ({ ...f, effortHours: Number(e.target.value) }))}
             className="w-full accent-indigo-500"
           />
+        </div>
+
+        {/* People Helped */}
+        <div>
+          <label className="block text-sm text-gray-400 mb-2">
+            People Helped: <span className="text-white">{form.peopleHelped}</span>
+          </label>
+          <input
+            type="range"
+            min={1}
+            max={500}
+            step={1}
+            value={form.peopleHelped}
+            onChange={(e) => setForm((f) => ({ ...f, peopleHelped: Number(e.target.value) }))}
+            className="w-full accent-indigo-500"
+          />
+          <div className="flex justify-between text-xs text-gray-600 mt-1">
+            <span>1 person</span>
+            <span>500+ people</span>
+          </div>
         </div>
 
         {/* GPS */}

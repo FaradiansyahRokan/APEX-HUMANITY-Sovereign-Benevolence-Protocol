@@ -1,16 +1,15 @@
-// Contract addresses — update after deployment
 export const CONTRACTS = {
-  // Alamat BenevolenceVault dari hasil deploy
-  BENEVOLENCE_VAULT: process.env.NEXT_PUBLIC_VAULT_ADDRESS || "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
-  
-  // Alamat ReputationLedger dari hasil deploy
-  REPUTATION_LEDGER: process.env.NEXT_PUBLIC_LEDGER_ADDRESS || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  
-  // Alamat ImpactToken (GOOD) dari hasil deploy
-  GOOD_TOKEN: process.env.NEXT_PUBLIC_GOOD_TOKEN_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  
-  // USDC bisa dibiarkan Zero Address dulu untuk testing lokal, atau diisi mock contract nanti
-  USDC: process.env.NEXT_PUBLIC_USDC_ADDRESS || "0x0000000000000000000000000000000000000000",
+  // 1. BenevolenceVault
+  BENEVOLENCE_VAULT: process.env.NEXT_PUBLIC_VAULT_ADDRESS || "0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690",
+
+  // 2. ReputationLedger
+  REPUTATION_LEDGER: process.env.NEXT_PUBLIC_LEDGER_ADDRESS || "0xc5a5C42992dECbae36851359345FE25997F5C42d",
+
+  // 3. GOOD Token (ImpactToken)
+  GOOD_TOKEN: process.env.NEXT_PUBLIC_GOOD_TOKEN_ADDRESS || "0x09635F643e140090A9A8Dcd712eD6285858ceBef",
+
+  // 4. USDC (MockUSDC) - Ini alamat baru dari deploy barusan
+  USDC: process.env.NEXT_PUBLIC_USDC_ADDRESS || "0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E",
 };
 
 export const ACTION_TYPES = [

@@ -45,7 +45,15 @@ async function main() {
   // ── Step 4: Deploy BenevolenceVault ───────────────────────────────────────
   // For testnet: use a mock USDC or deploy a test ERC-20
   const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS || deployer.address;
-  const STABLECOIN_ADDRESS = process.env.STABLECOIN_ADDRESS || ethers.ZeroAddress;
+
+  console.log("4/5 Deploying MockUSDC...");
+  const MockERC20 = await ethers.getContractFactory("MockERC20");
+  const mockUSDC = await MockERC20.deploy("USD Coin", "USDC", 6);
+  await mockUSDC.waitForDeployment();
+  const STABLECOIN_ADDRESS = await mockUSDC.getAddress();
+  console.log(`   ✅ MockUSDC:          ${STABLECOIN_ADDRESS}`);
+
+  
 
   console.log("4/5 Deploying BenevolenceVault...");
   const BenevolenceVault = await ethers.getContractFactory("BenevolenceVault");

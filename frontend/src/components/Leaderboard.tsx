@@ -1,142 +1,246 @@
 "use client";
 
 import { useState } from "react";
-import { getRank } from "../utils/constants";
+import { useReadContract } from "wagmi";
+import { REPUTATION_LEDGER_ABI } from "../utils/abis";
+import { CONTRACTS, getRank } from "../utils/constants";
 
-const MOCK_LEADERBOARD = [
-  { rank: 1,  address: "0xAbCd...1234", score: 94850, events: 312, country: "🇸🇸", name: "South Sudan" },
-  { rank: 2,  address: "0xDeEf...5678", score: 87220, events: 278, country: "🇾🇪", name: "Yemen" },
-  { rank: 3,  address: "0xF012...9abc", score: 81400, events: 241, country: "🇭🇹", name: "Haiti" },
-  { rank: 4,  address: "0x3456...def0", score: 74500, events: 199, country: "🇦🇫", name: "Afghanistan" },
-  { rank: 5,  address: "0x789a...bcde", score: 68900, events: 187, country: "🇸🇴", name: "Somalia" },
-  { rank: 6,  address: "0xBc12...3456", score: 61200, events: 154, country: "🇨🇩", name: "DR Congo" },
-  { rank: 7,  address: "0xEf34...7890", score: 55400, events: 132, country: "🇸🇾", name: "Syria" },
-  { rank: 8,  address: "0x1234...abcd", score: 48900, events: 119, country: "🇪🇹", name: "Ethiopia" },
-  { rank: 9,  address: "0x5678...ef01", score: 42100, events: 98,  country: "🇳🇬", name: "Nigeria" },
-  { rank: 10, address: "0x9abc...2345", score: 38700, events: 87,  country: "🇲🇲", name: "Myanmar" },
-];
+interface LeaderEntry { address: string; score: number; rank: number; }
 
-function RankMedal({ rank }: { rank: number }) {
-  if (rank === 1) return <span className="text-yellow-400 font-bold text-lg">🥇</span>;
-  if (rank === 2) return <span className="text-gray-300 font-bold text-lg">🥈</span>;
-  if (rank === 3) return <span className="text-orange-400 font-bold text-lg">🥉</span>;
-  return <span className="text-gray-500 font-semibold text-sm">#{rank}</span>;
+function Skeleton() {
+  return (
+    <div className="space-y-2">
+      {[...Array(5)].map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-5 py-4 rounded-xl"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div className="w-6 h-3 rounded animate-pulse" style={{ background: "var(--border2)" }} />
+          <div className="flex-1 h-3 rounded animate-pulse" style={{ background: "var(--border2)" }} />
+          <div className="w-16 h-3 rounded animate-pulse" style={{ background: "var(--border2)" }} />
+        </div>
+      ))}
+    </div>
+  );
 }
+
+function Empty() {
+  return (
+    <div className="py-24 text-center">
+      <p className="text-4xl mb-4">◎</p>
+      <p className="font-semibold" style={{ color: "var(--text-2)" }}>No volunteers yet</p>
+      <p className="text-sm mt-1" style={{ color: "var(--text-3)" }}>Submit your first impact proof to start the leaderboard</p>
+    </div>
+  );
+}
+
+const PODIUM_STYLES = [
+  { medal: "🥇", accent: "var(--gold)",    border: "rgba(201,168,76,0.2)",  bg: "rgba(201,168,76,0.05)"  },
+  { medal: "🥈", accent: "#94A3B8",        border: "rgba(148,163,184,0.2)", bg: "rgba(148,163,184,0.04)" },
+  { medal: "🥉", accent: "#CD7F32",        border: "rgba(205,127,50,0.2)",  bg: "rgba(205,127,50,0.04)"  },
+];
 
 export default function Leaderboard() {
   const [filter, setFilter] = useState<"all" | "weekly" | "monthly">("all");
+  const [page, setPage]     = useState(0);
+  const PAGE_SIZE           = 10;
+
+  const { data: totalLength } = useReadContract({
+    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
+    abi: REPUTATION_LEDGER_ABI,
+    functionName: "getLeaderboardLength",
+  });
+
+  const { data: pageData, isLoading } = useReadContract({
+    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
+    abi: REPUTATION_LEDGER_ABI,
+    functionName: "getLeaderboardPage",
+    args: [BigInt(page * PAGE_SIZE), BigInt(PAGE_SIZE)],
+    query: { refetchInterval: 10_000 },
+  });
+
+  const { data: globalStats } = useReadContract({
+    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
+    abi: REPUTATION_LEDGER_ABI,
+    functionName: "getGlobalStats",
+    query: { refetchInterval: 10_000 },
+  });
+
+  const addresses: readonly string[] = (pageData as any)?.[0] ?? [];
+  const scores:    readonly bigint[]  = (pageData as any)?.[1] ?? [];
+  const total      = Number(totalLength ?? 0);
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const entries: LeaderEntry[] = addresses
+    .map((addr, i) => ({ address: addr, score: Number(scores[i] ?? 0n), rank: page * PAGE_SIZE + i + 1 }))
+    .sort((a, b) => b.score - a.score);
+
+  const maxScore = entries[0]?.score ?? 1;
+  const top3     = entries.slice(0, 3);
 
   return (
     <div className="max-w-3xl">
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-white">🏆 Global Reputation Leaderboard</h2>
-          <p className="text-gray-500 text-sm mt-0.5">The world's most valuable humans — ranked by goodness</p>
+          <h2 className="font-bold text-lg" style={{ color: "var(--text)" }}>◆ Reputation Leaderboard</h2>
+          <p className="mono text-xs mt-1" style={{ color: "var(--text-3)" }}>
+            {total > 0 ? `${total} verified volunteer${total !== 1 ? "s" : ""} on-chain` : "Live from ReputationLedger contract"}
+          </p>
         </div>
-        {/* Filter Tabs */}
-        <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
+
+        {/* Filter */}
+        <div className="flex gap-0.5 p-0.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           {(["all", "weekly", "monthly"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 text-sm rounded-lg capitalize transition-all ${
-                filter === f
-                  ? "bg-indigo-600 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              {f === "all" ? "All Time" : f === "weekly" ? "This Week" : "This Month"}
+            <button key={f} onClick={() => setFilter(f)}
+              className="px-4 py-1.5 mono text-xs rounded-lg transition-all"
+              style={{
+                background: filter === f ? "var(--surface2)" : "transparent",
+                color:      filter === f ? "var(--text)"     : "var(--text-3)",
+                border:     filter === f ? "1px solid var(--border2)" : "1px solid transparent",
+              }}>
+              {f === "all" ? "All Time" : f === "weekly" ? "7 Days" : "30 Days"}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Top 3 Podium */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        {MOCK_LEADERBOARD.slice(0, 3).map((entry) => {
-          const rep = getRank(entry.score / 100);
-          return (
-            <div
-              key={entry.rank}
-              className={`rounded-2xl p-4 text-center border ${
-                entry.rank === 1
-                  ? "bg-yellow-900/20 border-yellow-700/40"
-                  : entry.rank === 2
-                  ? "bg-gray-800/40 border-gray-600/40"
-                  : "bg-orange-900/20 border-orange-700/40"
-              }`}
-            >
-              <div className="text-3xl mb-1">
-                {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : "🥉"}
+      {/* Global Stats */}
+{globalStats && (
+  <div className="grid grid-cols-2 gap-3 mb-6">
+    {[
+      { 
+        label: "Total Volunteers", 
+        value: Number((globalStats as any)[0]).toLocaleString("en-US"), 
+        color: "var(--cyan)" 
+      },
+      { 
+        label: "Total Impact Generated",
+        // FIX: Dibagi 100 dan tambahkan desimal agar presisi
+        value: (Number((globalStats as any)[1]) / 100).toLocaleString("en-US", { 
+          minimumFractionDigits: 2, 
+          maximumFractionDigits: 2 
+        }), 
+        color: "var(--gold)" 
+      },
+    ].map((s) => (
+      <div key={s.label} className="rounded-xl p-4 text-center"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <p className="text-2xl font-bold mono" style={{ color: s.color }}>{s.value}</p>
+        <p className="mono text-xs mt-1" style={{ color: "var(--text-3)" }}>{s.label}</p>
+      </div>
+    ))}
+  </div>
+)}
+
+      {/* States */}
+      {isLoading && <Skeleton />}
+      {!isLoading && entries.length === 0 && <Empty />}
+
+      {/* Podium */}
+      {!isLoading && top3.length >= 3 && page === 0 && (
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {top3.map((entry, i) => {
+            const p   = PODIUM_STYLES[i];
+            const rep = getRank(entry.score / 100);
+            return (
+              <div key={entry.address} className="rounded-2xl p-4 text-center"
+                style={{ background: p.bg, border: `1px solid ${p.border}` }}>
+                <div className="text-2xl mb-2">{p.medal}</div>
+                <p className="font-bold text-xs mb-1" style={{ color: p.accent }}>{rep.icon} {rep.rank}</p>
+                <p className="mono text-xs mb-3" style={{ color: "var(--text-3)" }}>
+                  {entry.address.slice(0, 6)}...{entry.address.slice(-4)}
+                </p>
+                <p className="text-xl font-bold mono" style={{ color: p.accent }}>
+                  {entry.score.toLocaleString("en-US")}
+                </p>
+                <p className="mono text-xs mt-0.5" style={{ color: "var(--text-3)" }}>pts</p>
               </div>
-              <p className="text-white font-bold text-sm">{rep.icon} {rep.rank}</p>
-              <p className="text-gray-400 text-xs font-mono">{entry.address}</p>
-              <p className="text-white font-bold text-lg mt-2">
-                {entry.score.toLocaleString()}
-              </p>
-              <p className="text-gray-500 text-xs">points</p>
-              <p className="text-gray-400 text-xs mt-1">{entry.country} {entry.name}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Full Table */}
-      <div className="bg-gray-900/50 border border-gray-800 rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-gray-500 text-xs uppercase tracking-wider bg-gray-900/80">
-              <th className="text-left px-4 py-3">Rank</th>
-              <th className="text-left px-4 py-3">Volunteer</th>
-              <th className="text-left px-4 py-3">Location</th>
-              <th className="text-left px-4 py-3">Tier</th>
-              <th className="text-right px-4 py-3">Events</th>
-              <th className="text-right px-4 py-3">Score</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800/50">
-            {MOCK_LEADERBOARD.map((entry) => {
-              const rep = getRank(entry.score / 100);
-              return (
-                <tr
-                  key={entry.rank}
-                  className="hover:bg-gray-800/30 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <RankMedal rank={entry.rank} />
-                  </td>
-                  <td className="px-4 py-3 font-mono text-gray-300 text-xs">
-                    {entry.address}
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">
-                    {entry.country} {entry.name}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs bg-gray-800 px-2 py-0.5 rounded-full text-gray-300">
-                      {rep.icon} {rep.rank}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-300">
-                    {entry.events}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="text-indigo-400 font-bold">
-                      {entry.score.toLocaleString()}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        <div className="px-4 py-3 border-t border-gray-800 text-center">
-          <button className="text-indigo-400 hover:text-indigo-300 text-sm transition-colors">
-            View full leaderboard →
-          </button>
+            );
+          })}
         </div>
-      </div>
+      )}
+
+      {/* Table */}
+      {!isLoading && entries.length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          {/* Header */}
+          <div className="grid grid-cols-12 gap-2 px-5 py-3 mono text-xs"
+            style={{ borderBottom: "1px solid var(--border)", color: "var(--text-3)", letterSpacing: "0.08em" }}>
+            <div className="col-span-1">#</div>
+            <div className="col-span-5">VOLUNTEER</div>
+            <div className="col-span-3">TIER</div>
+            <div className="col-span-3 text-right">SCORE</div>
+          </div>
+
+          {/* Rows */}
+          {entries.map((entry, i) => {
+            const rep = getRank(entry.score / 100);
+            const barW = maxScore > 0 ? (entry.score / maxScore) * 100 : 0;
+            const isTop = entry.rank <= 3;
+            return (
+              <div key={entry.address}
+                className="group grid grid-cols-12 gap-2 px-5 py-3.5 items-center relative transition-colors"
+                style={{
+                  borderBottom: i < entries.length - 1 ? "1px solid var(--border)" : "none",
+                  background: "transparent",
+                }}>
+                {/* Score bar bg */}
+                <div className="absolute inset-y-0 left-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ width: `${barW}%`, background: "rgba(0,212,255,0.025)", pointerEvents: "none" }} />
+
+                <div className="col-span-1 mono text-xs font-bold"
+                  style={{ color: isTop ? "var(--gold)" : "var(--text-3)" }}>
+                  {entry.rank <= 3 ? ["🥇","🥈","🥉"][entry.rank - 1] : `#${entry.rank}`}
+                </div>
+                <div className="col-span-5 mono text-xs" style={{ color: "var(--text-2)" }}>
+                  {entry.address.slice(0, 8)}...{entry.address.slice(-6)}
+                </div>
+                <div className="col-span-3">
+                  <span className="mono text-xs px-2 py-0.5 rounded-full"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-2)" }}>
+                    {rep.icon} {rep.rank}
+                  </span>
+                </div>
+                <div className="col-span-3 text-right mono text-sm font-bold" style={{ color: "var(--cyan)" }}>
+                  {(entry.score / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-3"
+              style={{ borderTop: "1px solid var(--border)" }}>
+              <span className="mono text-xs" style={{ color: "var(--text-3)" }}>
+                {page + 1} / {totalPages} · {total} entries
+              </span>
+              <div className="flex gap-2">
+                {[{ label: "← Prev", dis: page === 0, fn: () => setPage(p => p - 1) },
+                  { label: "Next →", dis: page >= totalPages - 1, fn: () => setPage(p => p + 1) }].map((btn) => (
+                  <button key={btn.label} onClick={btn.fn} disabled={btn.dis}
+                    className="mono text-xs px-3 py-1.5 rounded-lg transition-all"
+                    style={{
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
+                      color: btn.dis ? "var(--text-3)" : "var(--text-2)",
+                      opacity: btn.dis ? 0.4 : 1,
+                      cursor: btn.dis ? "not-allowed" : "pointer",
+                    }}>
+                    {btn.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Live footer */}
+          <div className="px-5 py-2.5 flex items-center gap-2" style={{ borderTop: "1px solid var(--border)" }}>
+            <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: "var(--emerald)" }} />
+            <span className="mono text-xs" style={{ color: "var(--text-3)" }}>Live on-chain · refreshes every 10s</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,307 +2,335 @@
 pragma solidity ^0.8.20;
 
 /**
- * @title BenevolenceVault — APEX HUMANITY Protocol
- * @author APEX HUMANITY Core
- * @notice Escrow vault that releases funds only upon verified oracle signatures
- *         from the SATIN (Sovereign Autonomous Trust & Impact Network) AI Oracle.
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║          APEX HUMANITY — BenevolenceVault.sol                           ║
+ * ║          Sovereign Benevolence Protocol  v1.0.0                         ║
+ * ║                                                                          ║
+ * ║  Escrow vault that releases ImpactTokens only upon receiving a          ║
+ * ║  cryptographically signed approval from the authorised SATIN Oracle.    ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
  *
- * ARCHITECTURE:
- *   Donor → deposits USDC into vault
- *   Volunteer submits Impact Proof → SATIN Oracle verifies → Oracle signs message
- *   Volunteer submits signed oracle payload on-chain
- *   Contract verifies ECDSA signature → releases funds + mints GOOD tokens
- *   ReputationLedger updated (immutable, soulbound)
- *
- * @dev Uses ECDSA from OpenZeppelin for signature verification.
- *      All oracle messages must be signed by the registered oracle address.
+ * Key Features:
+ *  - Funds held in escrow, never accessible to admin directly
+ *  - Oracle signature verified on-chain via ecrecover
+ *  - Replay-attack protection via nonce + expiry
+ *  - Immutable reputation updates via ReputationLedger
+ *  - Pausable by DAO governance in emergencies
+ *  - Full event log for transparent fund tracing
  */
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-// ── Interfaces ────────────────────────────────────────────────────────────────
+import "./ImpactToken.sol";
+import "./ReputationLedger.sol";
 
-interface IGoodToken {
-    function mint(address to, uint256 amount) external;
-}
-
-interface IReputationLedger {
-    function recordImpact(
-        address volunteer,
-        bytes32 eventHash,
-        uint256 impactScore,
-        string calldata actionType
-    ) external;
-
-    function getReputation(address volunteer) external view returns (uint256);
-}
-
-// ── Custom Errors ──────────────────────────────────────────────────────────────
-
-error BV__InvalidOracleSignature();
-error BV__EventAlreadyProcessed(bytes32 eventHash);
-error BV__InsufficientVaultBalance(uint256 available, uint256 required);
-error BV__InvalidImpactScore(uint256 score);
-error BV__ZeroAddress();
-error BV__UnauthorizedOracle(address signer, address expected);
-error BV__DonationTooSmall(uint256 sent, uint256 minimum);
-error BV__TokenTransferFailed();
-
-// ── Events ─────────────────────────────────────────────────────────────────────
-
-event FundsDonated(address indexed donor, uint256 amount, uint256 timestamp);
-event ImpactVerified(
-    bytes32 indexed eventHash,
-    address indexed volunteer,
-    bytes32 indexed beneficiaryZKPHash,
-    uint256 impactScore,
-    uint256 rewardAmount,
-    string actionType
-);
-event ReputationUpdated(address indexed volunteer, uint256 newScore, uint256 totalScore);
-event OracleUpdated(address indexed oldOracle, address indexed newOracle);
-event EmergencyWithdrawal(address indexed to, uint256 amount);
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * @title BenevolenceVault
- */
-contract BenevolenceVault is Ownable, ReentrancyGuard, Pausable {
-    using ECDSA for bytes32;
-    using MessageHashUtils for bytes32;
+contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
 
-    // ── Constants ──────────────────────────────────────────────────────────────
-    uint256 public constant SCORE_PRECISION = 100;   // ImpactScore stored × 100
-    uint256 public constant MAX_IMPACT_SCORE = 10000; // 100.00 × 100
-    uint256 public constant MIN_DONATION = 1e6;       // 1 USDC (6 decimals)
-    uint256 public constant GOOD_TOKEN_MULTIPLIER = 10 ether; // 10 GOOD per score point
+    // ── Roles ─────────────────────────────────────────────────────────────────
+    bytes32 public constant ORACLE_ROLE    = keccak256("ORACLE_ROLE");
+    bytes32 public constant DAO_ADMIN_ROLE = keccak256("DAO_ADMIN_ROLE");
+    bytes32 public constant DONOR_ROLE     = keccak256("DONOR_ROLE");
 
-    // ── State Variables ────────────────────────────────────────────────────────
+    // ── State Variables ───────────────────────────────────────────────────────
+    ImpactToken        public immutable impactToken;
+    ReputationLedger   public immutable reputationLedger;
+    IERC20             public immutable stablecoin;       // e.g. USDC for stable rewards
 
-    /// @notice USDC or stablecoin held in escrow
-    IERC20 public immutable stablecoin;
+    address public oracleAddress;   // SATIN Oracle signer address
 
-    /// @notice GOOD Impact Token contract
-    IGoodToken public immutable goodToken;
-
-    /// @notice Immutable Reputation Ledger
-    IReputationLedger public immutable reputationLedger;
-
-    /// @notice The authorized SATIN Oracle address (ECDSA signer)
-    address public oracleAddress;
-
-    /// @notice Total USDC donated to the vault
-    uint256 public totalDonations;
-
-    /// @notice Total USDC released as aid
-    uint256 public totalReleased;
-
-    /// @notice Total verified impact events
+    uint256 public totalFundsDeposited;
+    uint256 public totalFundsDistributed;
     uint256 public totalEventsVerified;
+    uint256 public minImpactScoreToRelease = 3000; // 30.00 in scaled uint (×100)
 
-    /// @notice Mapping of processed event hashes (prevents replay attacks)
-    mapping(bytes32 => bool) public processedEvents;
+    // ── Anti-Replay Protection ────────────────────────────────────────────────
+    mapping(bytes32 => bool) private _usedEventIds;
+    mapping(string  => bool) private _usedNonces;
 
-    /// @notice Reward tier based on impact score (score × 100 → USDC wei)
-    /// Example: score 80.00 → 8000 → 50 USDC reward
-    mapping(uint256 => uint256) public rewardTiers;
+    // ── Donor Escrow ──────────────────────────────────────────────────────────
+    mapping(address => uint256) public donorDeposits;   // Track each donor's contribution
 
-    // ── Constructor ────────────────────────────────────────────────────────────
+    // ── Event Log (immutable audit trail) ────────────────────────────────────
+    event FundsDeposited(
+        address indexed donor,
+        uint256 amount,
+        uint256 totalPoolBalance,
+        uint256 timestamp
+    );
 
-    constructor(
-        address _stablecoin,
-        address _goodToken,
-        address _reputationLedger,
-        address _oracleAddress,
-        address _initialOwner
-    ) Ownable(_initialOwner) {
-        if (
-            _stablecoin == address(0) ||
-            _goodToken == address(0) ||
-            _reputationLedger == address(0) ||
-            _oracleAddress == address(0)
-        ) revert BV__ZeroAddress();
-
-        stablecoin = IERC20(_stablecoin);
-        goodToken = IGoodToken(_goodToken);
-        reputationLedger = IReputationLedger(_reputationLedger);
-        oracleAddress = _oracleAddress;
-
-        // Default reward tiers (USDC with 6 decimals)
-        // Impact score ≥ X → reward Y USDC
-        rewardTiers[9000] = 100e6;   // Score ≥ 90.00 → 100 USDC
-        rewardTiers[7500] = 50e6;    // Score ≥ 75.00 →  50 USDC
-        rewardTiers[5000] = 20e6;    // Score ≥ 50.00 →  20 USDC
-        rewardTiers[2500] = 5e6;     // Score ≥ 25.00 →   5 USDC
-        rewardTiers[0]    = 1e6;     // Score ≥ 0     →   1 USDC (participation)
-    }
-
-    // ── Donor Interface ────────────────────────────────────────────────────────
-
-    /**
-     * @notice Donors call this to deposit stablecoins into the vault.
-     * @param amount Amount of stablecoin (in token units with decimals)
-     */
-    function donate(uint256 amount) external nonReentrant whenNotPaused {
-        if (amount < MIN_DONATION) revert BV__DonationTooSmall(amount, MIN_DONATION);
-        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
-        totalDonations += amount;
-        emit FundsDonated(msg.sender, amount, block.timestamp);
-    }
-
-    // ── Core: Oracle-Triggered Fund Release ───────────────────────────────────
-
-    /**
-     * @notice Submit a SATIN Oracle-signed Impact Proof to release funds.
-     *
-     * @param eventHash         SHA-256 hash of the canonical event data (from SATIN)
-     * @param volunteerAddress  Address of the volunteer to reward
-     * @param beneficiaryZKPHash  ZK-proof hash protecting beneficiary identity
-     * @param impactScore       Score × 100 (e.g. 7550 = 75.50)
-     * @param actionType        String identifier of the action (e.g. "FOOD_DISTRIBUTION")
-     * @param oracleSignature   ECDSA signature from the SATIN Oracle
-     */
-    function submitVerifiedImpact(
-        bytes32 eventHash,
-        address volunteerAddress,
-        bytes32 beneficiaryZKPHash,
+    event RewardReleased(
+        bytes32 indexed eventId,
+        address indexed volunteer,
+        address indexed beneficiary,
         uint256 impactScore,
-        string calldata actionType,
-        bytes calldata oracleSignature
-    ) external nonReentrant whenNotPaused {
-        // ── 1. Replay protection ───────────────────────────────────────────────
-        if (processedEvents[eventHash]) {
-            revert BV__EventAlreadyProcessed(eventHash);
-        }
+        uint256 tokenReward,
+        bytes32 zkProofHash,
+        bytes32 eventHash,
+        uint256 timestamp
+    );
 
-        // ── 2. Input validation ────────────────────────────────────────────────
-        if (volunteerAddress == address(0)) revert BV__ZeroAddress();
-        if (impactScore > MAX_IMPACT_SCORE) revert BV__InvalidImpactScore(impactScore);
+    event ReputationUpdated(
+        address indexed volunteer,
+        uint256 newScore,
+        uint256 cumulativeScore
+    );
 
-        // ── 3. Reconstruct the signed message (mirrors SATIN _abi_encode_message) ──
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                eventHash,
-                volunteerAddress,
-                beneficiaryZKPHash,
-                impactScore
-            )
-        );
+    event OracleAddressUpdated(address oldOracle, address newOracle);
+    event MinScoreUpdated(uint256 oldMin, uint256 newMin);
+    event EmergencyWithdraw(address indexed admin, uint256 amount);
 
-        // EIP-191: prefix with "\x19Ethereum Signed Message:\n32"
-        bytes32 ethSignedHash = messageHash.toEthSignedMessageHash();
+    // ── Errors ────────────────────────────────────────────────────────────────
+    error InvalidOracleSignature();
+    error EventAlreadyProcessed(bytes32 eventId);
+    error NonceAlreadyUsed(string nonce);
+    error PayloadExpired(uint256 expiredAt, uint256 currentTime);
+    error ScoreBelowMinimum(uint256 score, uint256 minimum);
+    error InsufficientVaultBalance(uint256 requested, uint256 available);
+    error InvalidAddress();
+    error ZeroAmount();
 
-        // ── 4. Verify oracle ECDSA signature ──────────────────────────────────
-        address recoveredSigner = ethSignedHash.recover(oracleSignature);
-        if (recoveredSigner != oracleAddress) {
-            revert BV__UnauthorizedOracle(recoveredSigner, oracleAddress);
-        }
+    // ── Constructor ───────────────────────────────────────────────────────────
+    constructor(
+        address _impactToken,
+        address _reputationLedger,
+        address _stablecoin,
+        address _oracleAddress,
+        address _daoAdmin
+    ) {
+        if (_impactToken       == address(0)) revert InvalidAddress();
+        if (_reputationLedger  == address(0)) revert InvalidAddress();
+        if (_oracleAddress     == address(0)) revert InvalidAddress();
 
-        // ── 5. Mark as processed (CEI pattern) ────────────────────────────────
-        processedEvents[eventHash] = true;
-        totalEventsVerified++;
+        impactToken       = ImpactToken(_impactToken);
+        reputationLedger  = ReputationLedger(_reputationLedger);
+        stablecoin        = IERC20(_stablecoin);
+        oracleAddress     = _oracleAddress;
 
-        // ── 6. Calculate reward amount ─────────────────────────────────────────
-        uint256 rewardAmount = _calculateReward(impactScore);
-
-        // ── 7. Release stablecoin reward to volunteer ──────────────────────────
-        uint256 vaultBalance = stablecoin.balanceOf(address(this));
-        if (vaultBalance < rewardAmount) {
-            revert BV__InsufficientVaultBalance(vaultBalance, rewardAmount);
-        }
-        stablecoin.safeTransfer(volunteerAddress, rewardAmount);
-        totalReleased += rewardAmount;
-
-        // ── 8. Mint GOOD tokens (reputation capital) ──────────────────────────
-        uint256 goodTokenAmount = (impactScore * GOOD_TOKEN_MULTIPLIER) / SCORE_PRECISION;
-        goodToken.mint(volunteerAddress, goodTokenAmount);
-
-        // ── 9. Update immutable Reputation Ledger ─────────────────────────────
-        reputationLedger.recordImpact(
-            volunteerAddress,
-            eventHash,
-            impactScore,
-            actionType
-        );
-
-        uint256 newReputation = reputationLedger.getReputation(volunteerAddress);
-
-        emit ImpactVerified(
-            eventHash,
-            volunteerAddress,
-            beneficiaryZKPHash,
-            impactScore,
-            rewardAmount,
-            actionType
-        );
-        emit ReputationUpdated(volunteerAddress, impactScore, newReputation);
+        _grantRole(DEFAULT_ADMIN_ROLE, _daoAdmin);
+        _grantRole(DAO_ADMIN_ROLE,     _daoAdmin);
+        _grantRole(ORACLE_ROLE,        _oracleAddress);
     }
 
-    // ── Internal: Reward Calculation ──────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════
+    //  CORE: RELEASE REWARD
+    // ══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @dev Determines USDC reward based on graduated impact score tiers.
-     * @param score Impact score × 100 (0 – 10000)
+     * @notice Called by the dApp after receiving a signed payload from SATIN Oracle.
+     * @dev Verifies oracle signature → validates score → mints ImpactTokens → updates reputation.
+     *
+     * @param eventId           Unique event UUID (as bytes32)
+     * @param volunteerAddress  Wallet receiving the token reward
+     * @param beneficiaryAddress Wallet of aid recipient (can be ZK-anonymised)
+     * @param impactScoreScaled  ImpactScore × 100 (e.g. 7550 = 75.50 score)
+     * @param tokenRewardWei    ImpactToken amount in wei (18 decimals)
+     * @param zkProofHash       ZK commitment hash (beneficiary identity proof)
+     * @param eventHash         Immutable fingerprint of the impact event
+     * @param nonce             One-time random string (anti-replay)
+     * @param expiresAt         Unix timestamp after which payload is invalid
+     * @param v, r, s           ECDSA signature components from Oracle
      */
-    function _calculateReward(uint256 score) internal view returns (uint256) {
-        if (score >= 9000) return rewardTiers[9000];
-        if (score >= 7500) return rewardTiers[7500];
-        if (score >= 5000) return rewardTiers[5000];
-        if (score >= 2500) return rewardTiers[2500];
-        return rewardTiers[0];
+    function releaseReward(
+        bytes32 eventId,
+        address volunteerAddress,
+        address beneficiaryAddress,
+        uint256 impactScoreScaled,
+        uint256 tokenRewardWei,
+        bytes32 zkProofHash,
+        bytes32 eventHash,
+        string  calldata nonce,
+        uint256 expiresAt,
+        uint8   v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
+        // ── Guard Checks ──────────────────────────────────────────────────────
+        if (volunteerAddress  == address(0)) revert InvalidAddress();
+        if (beneficiaryAddress == address(0)) revert InvalidAddress();
+        if (tokenRewardWei == 0) revert ZeroAmount();
+
+        if (_usedEventIds[eventId])
+            revert EventAlreadyProcessed(eventId);
+        if (_usedNonces[nonce])
+            revert NonceAlreadyUsed(nonce);
+        if (block.timestamp > expiresAt)
+            revert PayloadExpired(expiresAt, block.timestamp);
+        if (impactScoreScaled < minImpactScoreToRelease)
+            revert ScoreBelowMinimum(impactScoreScaled, minImpactScoreToRelease);
+
+        // ── Verify Oracle Signature ───────────────────────────────────────────
+        bytes32 signingHash = _buildSigningHash(
+            eventId, volunteerAddress, beneficiaryAddress,
+            impactScoreScaled, tokenRewardWei, zkProofHash,
+            eventHash, nonce, expiresAt
+        );
+        address recovered = MessageHashUtils.toEthSignedMessageHash(signingHash).recover(v, r, s);
+        if (recovered != oracleAddress)
+            revert InvalidOracleSignature();
+
+        // ── Mark as Processed (anti-replay) ──────────────────────────────────
+        _usedEventIds[eventId] = true;
+        _usedNonces[nonce]     = true;
+
+        // ── Mint ImpactTokens to Volunteer ────────────────────────────────────
+        impactToken.mint(volunteerAddress, tokenRewardWei);
+
+        // ── Update Global Reputation Ledger ───────────────────────────────────
+        uint256 newRepScore = reputationLedger.updateReputation(
+            volunteerAddress,
+            impactScoreScaled
+        );
+
+        // ── Update Stats ──────────────────────────────────────────────────────
+        totalFundsDistributed += tokenRewardWei;
+        totalEventsVerified   += 1;
+
+        // ── Emit Events (immutable, traceable audit trail) ────────────────────
+        emit RewardReleased(
+            eventId,
+            volunteerAddress,
+            beneficiaryAddress,
+            impactScoreScaled,
+            tokenRewardWei,
+            zkProofHash,
+            eventHash,
+            block.timestamp
+        );
+
+        emit ReputationUpdated(volunteerAddress, impactScoreScaled, newRepScore);
     }
 
-    // ── View Functions ────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════
+    //  DONOR FUNCTIONS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Donors deposit stablecoins into the vault to fund impact rewards.
+     * @dev Deposits are tracked per-donor for transparency. Funds can only leave
+     *      via oracle-verified releaseReward calls — never by admin.
+     */
+    function deposit(uint256 amount) external nonReentrant whenNotPaused {
+        if (amount == 0) revert ZeroAmount();
+        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
+        donorDeposits[msg.sender] += amount;
+        totalFundsDeposited       += amount;
+        emit FundsDeposited(msg.sender, amount, stablecoin.balanceOf(address(this)), block.timestamp);
+    }
+
+    receive() external payable {
+        // Accept native ETH/MATIC donations
+        totalFundsDeposited += msg.value;
+        emit FundsDeposited(msg.sender, msg.value, address(this).balance, block.timestamp);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  GOVERNANCE FUNCTIONS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice DAO can rotate the oracle address (e.g. after key rotation).
+     */
+    function setOracleAddress(address newOracle) external onlyRole(DAO_ADMIN_ROLE) {
+        if (newOracle == address(0)) revert InvalidAddress();
+        address old = oracleAddress;
+        _revokeRole(ORACLE_ROLE, old);
+        _grantRole(ORACLE_ROLE, newOracle);
+        oracleAddress = newOracle;
+        emit OracleAddressUpdated(old, newOracle);
+    }
+
+    /**
+     * @notice DAO can adjust minimum impact score threshold.
+     */
+    function setMinImpactScore(uint256 newMin) external onlyRole(DAO_ADMIN_ROLE) {
+        emit MinScoreUpdated(minImpactScoreToRelease, newMin);
+        minImpactScoreToRelease = newMin;
+    }
+
+    function pause()   external onlyRole(DAO_ADMIN_ROLE) { _pause(); }
+    function unpause() external onlyRole(DAO_ADMIN_ROLE) { _unpause(); }
+
+    /**
+     * @notice Emergency only — withdraw stablecoins to DAO treasury multisig.
+     * @dev Cannot drain ImpactTokens (those are minted, not held).
+     */
+    function emergencyWithdraw(address to, uint256 amount)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+        whenPaused
+    {
+        if (to == address(0)) revert InvalidAddress();
+        stablecoin.safeTransfer(to, amount);
+        emit EmergencyWithdraw(to, amount);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  VIEW FUNCTIONS
+    // ══════════════════════════════════════════════════════════════════════════
 
     function vaultBalance() external view returns (uint256) {
         return stablecoin.balanceOf(address(this));
     }
 
-    function isEventProcessed(bytes32 eventHash) external view returns (bool) {
-        return processedEvents[eventHash];
+    function isEventProcessed(bytes32 eventId) external view returns (bool) {
+        return _usedEventIds[eventId];
     }
 
-    function getVolunteerReputation(address volunteer) external view returns (uint256) {
-        return reputationLedger.getReputation(volunteer);
+    function isNonceUsed(string calldata nonce) external view returns (bool) {
+        return _usedNonces[nonce];
     }
 
-    // ── Admin Functions ───────────────────────────────────────────────────────
+    function getStats() external view returns (
+        uint256 deposited,
+        uint256 distributed,
+        uint256 eventsVerified,
+        uint256 currentBalance
+    ) {
+        return (
+            totalFundsDeposited,
+            totalFundsDistributed,
+            totalEventsVerified,
+            stablecoin.balanceOf(address(this))
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  INTERNAL
+    // ══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Rotate the oracle address (e.g., after key compromise).
-     * @dev Only callable by contract owner. Emits OracleUpdated event.
+     * @dev Mirrors the signing hash constructed by SATIN Oracle's _build_signing_hash().
+     *      MUST match exactly — any difference causes ecrecover to return wrong address.
      */
-    function updateOracleAddress(address newOracle) external onlyOwner {
-        if (newOracle == address(0)) revert BV__ZeroAddress();
-        address oldOracle = oracleAddress;
-        oracleAddress = newOracle;
-        emit OracleUpdated(oldOracle, newOracle);
-    }
-
-    function updateRewardTier(uint256 scoreThreshold, uint256 rewardAmount) external onlyOwner {
-        rewardTiers[scoreThreshold] = rewardAmount;
-    }
-
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    /// @notice Emergency withdrawal — only owner, only when paused
-    function emergencyWithdraw(address to, uint256 amount) external onlyOwner whenPaused {
-        if (to == address(0)) revert BV__ZeroAddress();
-        stablecoin.safeTransfer(to, amount);
-        emit EmergencyWithdrawal(to, amount);
+    function _buildSigningHash(
+        bytes32 eventId,
+        address volunteerAddress,
+        address beneficiaryAddress,
+        uint256 impactScoreScaled,
+        uint256 tokenRewardWei,
+        bytes32 zkProofHash,
+        bytes32 eventHash,
+        string  calldata nonce,
+        uint256 expiresAt
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            eventId,
+            volunteerAddress,
+            beneficiaryAddress,
+            impactScoreScaled,
+            tokenRewardWei,
+            zkProofHash,
+            eventHash,
+            nonce,
+            expiresAt
+        ));
     }
 }
