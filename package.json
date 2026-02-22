@@ -1,0 +1,34 @@
+{
+  "name": "apex-humanity",
+  "version": "1.0.0",
+  "description": "APEX HUMANITY — Sovereign Benevolence Protocol (PoBA Layer 1 Solution)",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
+    "deploy:mumbai": "hardhat run scripts/deploy.ts --network polygon_mumbai",
+    "deploy:polygon": "hardhat run scripts/deploy.ts --network polygon",
+    "node": "hardhat node",
+    "oracle:start": "cd oracle && uvicorn oracle_server:app --reload --host 0.0.0.0 --port 8000",
+    "oracle:test": "python oracle/impact_evaluator.py",
+    "frontend:dev": "cd frontend && npm run dev",
+    "docker:dev": "docker compose --profile dev up",
+    "docker:up": "docker compose up",
+    "lint": "eslint . && solhint 'contracts/**/*.sol'"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/hardhat-upgrades": "^3.0.3",
+    "hardhat": "^2.20.1",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "dotenv": "^16.4.1",
+    "eslint": "^8.56.0",
+    "solhint": "^4.5.2"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.1"
+  }
+}

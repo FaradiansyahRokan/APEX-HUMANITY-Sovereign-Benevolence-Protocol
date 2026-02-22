@@ -1,0 +1,49 @@
+# =========================================
+# APEX HUMANITY - Global .gitignore
+# =========================================
+
+# ── 1. OS & Editor ───────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── 2. Secrets & Environment Variables ───
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── 3. Node.js & Frontend (Next.js) ──────
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnp
+.pnp.js
+.next/
+out/
+build/
+.vercel/
+
+# ── 4. Smart Contracts (Hardhat) ─────────
+contracts/artifacts/
+contracts/cache/
+contracts/typechain/
+contracts/typechain-types/
+contracts/coverage/
+contracts/coverage.json
+# (Opsional) Abaikan file address hasil deploy lokal
+deployed-addresses.json
+
+# ── 5. Python & Oracle (FastAPI/AI) ──────
+__pycache__/
+*.py[cod]
+*$py.class
+oracle/.venv/
+oracle/venv/
+oracle/env/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/

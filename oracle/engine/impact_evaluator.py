@@ -1,0 +1,692 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           APEX HUMANITY — SATIN Oracle Impact Engine                        ║
+║           Sovereign Benevolence Protocol  v1.0.0                            ║
+║                                                                              ║
+║   ImpactEvaluator: Verify · Score · Hash · Sign all human good deeds        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import math
+import os
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+# ─── Logger ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | SATIN | %(message)s",
+)
+log = logging.getLogger("satin.impact_evaluator")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ENUMS & CONSTANTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ActionType(str, Enum):
+    FOOD_DISTRIBUTION    = "food_distribution"
+    MEDICAL_AID          = "medical_aid"
+    DISASTER_RELIEF      = "disaster_relief"
+    EDUCATION            = "education"
+    SHELTER              = "shelter"
+    CLEAN_WATER          = "clean_water"
+    ENVIRONMENTAL        = "environmental"
+    MENTAL_HEALTH        = "mental_health"
+    ECONOMIC_EMPOWERMENT = "economic_empowerment"
+    CUSTOM               = "custom"
+
+
+class VerificationStatus(str, Enum):
+    PENDING         = "PENDING"
+    VERIFIED        = "VERIFIED"
+    REJECTED        = "REJECTED"
+    REQUIRES_REVIEW = "REQUIRES_REVIEW"
+
+
+# Base difficulty multipliers per action type [0-10]
+ACTION_DIFFICULTY_BASE: Dict[ActionType, float] = {
+    ActionType.DISASTER_RELIEF:      9.5,
+    ActionType.MEDICAL_AID:          9.0,
+    ActionType.CLEAN_WATER:          8.5,
+    ActionType.SHELTER:              8.0,
+    ActionType.FOOD_DISTRIBUTION:    7.0,
+    ActionType.MENTAL_HEALTH:        7.5,
+    ActionType.ECONOMIC_EMPOWERMENT: 6.5,
+    ActionType.EDUCATION:            6.0,
+    ActionType.ENVIRONMENTAL:        5.5,
+    ActionType.CUSTOM:               5.0,
+}
+
+# Geographic crisis multipliers by ISO country code
+COUNTRY_CRISIS_MULTIPLIER: Dict[str, float] = {
+    "SS": 2.0,  # South Sudan
+    "SO": 1.95, # Somalia
+    "YE": 1.9,  # Yemen
+    "SY": 1.85, # Syria
+    "CF": 1.8,  # Central African Republic
+    "CD": 1.75, # DR Congo
+    "AF": 1.7,  # Afghanistan
+    "ET": 1.65, # Ethiopia
+    "HT": 1.6,  # Haiti
+    "MM": 1.55, # Myanmar
+    "NG": 1.4,  # Nigeria
+    "ID": 1.2,  # Indonesia
+    "IN": 1.15, # India
+    "BR": 1.1,  # Brazil
+    "DEFAULT": 1.0,
+}
+
+# Scoring weights — must sum to 1.0
+SCORE_WEIGHTS = {
+    "urgency":      0.35,
+    "difficulty":   0.25,
+    "reach":        0.20,
+    "authenticity": 0.20,
+}
+
+BASE_TOKEN_REWARD   = 100.0   # Base ImpactTokens for a perfect score
+MIN_SCORE_THRESHOLD = 30.0    # Minimum score to trigger any reward
+ORACLE_EXPIRY_SECS  = 3600    # Signed payload valid for 1 hour
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  DATA MODELS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class GPSCoordinates:
+    latitude:         float
+    longitude:        float
+    altitude:         float = 0.0
+    accuracy_meters:  float = 10.0
+    timestamp_unix:   int   = field(default_factory=lambda: int(time.time()))
+
+    def __post_init__(self) -> None:
+        if not (-90 <= self.latitude <= 90):
+            raise ValueError(f"Invalid latitude: {self.latitude}")
+        if not (-180 <= self.longitude <= 180):
+            raise ValueError(f"Invalid longitude: {self.longitude}")
+
+    def to_geohash(self) -> str:
+        """Deterministic geohash for on-chain location commitment."""
+        lat_enc = int((self.latitude + 90)   / 180 * 0xFFFF)
+        lng_enc = int((self.longitude + 180) / 360 * 0xFFFF)
+        return f"GH:{lat_enc:04x}{lng_enc:04x}"
+
+    def distance_km(self, other: "GPSCoordinates") -> float:
+        """Haversine distance between two coordinates."""
+        R = 6371.0
+        φ1, φ2 = math.radians(self.latitude), math.radians(other.latitude)
+        Δφ = math.radians(other.latitude  - self.latitude)
+        Δλ = math.radians(other.longitude - self.longitude)
+        a = math.sin(Δφ/2)**2 + math.cos(φ1)*math.cos(φ2)*math.sin(Δλ/2)**2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+@dataclass
+class EvidenceBundle:
+    ipfs_cid:           str              # IPFS content identifier for encrypted evidence
+    evidence_type:      str              # "image", "video", "iot_data", "document"
+    hash_sha256:        str              # SHA-256 of the raw evidence file
+    gps:                GPSCoordinates
+    action_type:        ActionType
+    people_helped:      int              # Reported count of beneficiaries
+    volunteer_address:  str              # EVM wallet address
+    beneficiary_address: str            # Can be ZK-anonymised address
+    country_iso:        str = "DEFAULT"
+    description:        Optional[str]   = None
+    raw_metadata:       Dict[str, Any]  = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.people_helped < 0:
+            raise ValueError("people_helped cannot be negative")
+        if not self.volunteer_address.startswith("0x"):
+            raise ValueError("volunteer_address must be a valid EVM address (0x...)")
+        self.volunteer_address  = self.volunteer_address.lower()
+        self.beneficiary_address = self.beneficiary_address.lower()
+
+
+@dataclass
+class ImpactScoreBreakdown:
+    urgency_score:       float = 0.0
+    difficulty_score:    float = 0.0
+    reach_score:         float = 0.0
+    authenticity_score:  float = 0.0
+    location_multiplier: float = 1.0
+    composite_score:     float = 0.0   # [0–100]
+    token_reward:        float = 0.0
+
+
+@dataclass
+class OraclePayload:
+    event_id:           str
+    volunteer_address:  str
+    beneficiary_address: str
+    impact_score:       float
+    token_reward:       float
+    zk_proof_hash:      str
+    event_hash:         str
+    nonce:              str
+    issued_at:          int
+    expires_at:         int
+    status:             VerificationStatus
+    score_breakdown:    Dict[str, float]
+    oracle_address:     str
+    signature:          Optional[Dict[str, str]] = None  # {v, r, s}
+
+    def to_contract_args(self) -> Dict[str, Any]:
+        """Format for BenevolenceVault.releaseReward() call."""
+        return {
+            "eventId":           self.event_id,
+            "volunteerAddress":  self.volunteer_address,
+            "beneficiaryAddress": self.beneficiary_address,
+            "impactScore":       int(self.impact_score * 100),  # Scaled x100 for uint256
+            "tokenReward":       int(self.token_reward * 10**18),  # Wei units
+            "zkProofHash":       self.zk_proof_hash,
+            "eventHash":         self.event_hash,
+            "nonce":             self.nonce,
+            "expiresAt":         self.expires_at,
+            "v":                 self.signature["v"] if self.signature else None,
+            "r":                 self.signature["r"] if self.signature else None,
+            "s":                 self.signature["s"] if self.signature else None,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MOCK AI ANALYZERS (Replace with real YOLOv8/HuggingFace in production)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MockCVAnalyzer:
+    """
+    Production replacement: load YOLOv8 + CLIP from ultralytics/transformers.
+    Returns confidence score [0–1] that image matches claimed action type.
+    """
+    ACTION_KEYWORDS = {
+        ActionType.FOOD_DISTRIBUTION:    ["food", "meal", "people", "distribution", "crowd"],
+        ActionType.MEDICAL_AID:          ["medical", "health", "clinic", "patient", "medicine"],
+        ActionType.DISASTER_RELIEF:      ["rubble", "rescue", "flood", "disaster", "emergency"],
+        ActionType.EDUCATION:            ["school", "children", "classroom", "books", "learning"],
+        ActionType.SHELTER:              ["tent", "shelter", "housing", "roof", "construction"],
+        ActionType.CLEAN_WATER:          ["water", "well", "pump", "filter", "drinking"],
+        ActionType.ENVIRONMENTAL:        ["tree", "planting", "cleanup", "environment", "green"],
+        ActionType.MENTAL_HEALTH:        ["counseling", "group", "support", "therapy", "people"],
+        ActionType.ECONOMIC_EMPOWERMENT: ["training", "skill", "workshop", "tools", "business"],
+    }
+
+    def analyze(self, ipfs_cid: str, action_type: ActionType,
+                metadata: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Analyze visual evidence. In production, this fetches IPFS content
+        and runs YOLO object detection + CLIP semantic similarity.
+        """
+        log.info(f"[CV] Analyzing IPFS CID={ipfs_cid} for action={action_type}")
+        # Simulate: real implementation would fetch & analyse the image
+        base_confidence  = 0.75
+        has_description  = 0.10 if metadata.get("description") else 0.0
+        has_geo_proof    = 0.10 if metadata.get("gps") else 0.0
+        has_multi_media  = 0.05 if metadata.get("evidence_type") == "video" else 0.0
+        confidence = min(1.0, base_confidence + has_description + has_geo_proof + has_multi_media)
+        return {
+            "confidence":     round(confidence, 4),
+            "detected_class": action_type.value,
+            "entity_count":   metadata.get("people_helped", 1),
+            "model_version":  "yolov8n-mock-v1",
+        }
+
+
+class MockNLPAnalyzer:
+    """
+    Production replacement: HuggingFace cardiffnlp/twitter-roberta-base-sentiment-latest
+    Returns sentiment + credibility scores for the impact description.
+    """
+    def analyze(self, text: Optional[str], action_type: ActionType) -> Dict[str, float]:
+        log.info(f"[NLP] Analyzing sentiment for action={action_type}")
+        if not text:
+            return {"sentiment_score": 0.5, "credibility": 0.5, "emotion": "neutral"}
+        length_bonus = min(0.2, len(text) / 500)
+        base = 0.65
+        return {
+            "sentiment_score": round(min(1.0, base + length_bonus), 4),
+            "credibility":     round(min(1.0, base + length_bonus * 0.5), 4),
+            "emotion":         "compassion",
+            "model_version":   "roberta-mock-v1",
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ORACLE SIGNER
+# ══════════════════════════════════════════════════════════════════════════════
+
+class OracleSigner:
+    """
+    Signs the oracle payload using ECDSA secp256k1 — compatible with
+    Solidity's ecrecover for on-chain signature verification.
+    """
+
+    def __init__(self, private_key_hex: Optional[str] = None) -> None:
+        if private_key_hex:
+            key_bytes = bytes.fromhex(private_key_hex.removeprefix("0x"))
+            self._private_key = ec.derive_private_key(
+                int.from_bytes(key_bytes, "big"), ec.SECP256K1()
+            )
+        else:
+            # Generate ephemeral key for development
+            self._private_key = ec.generate_private_key(ec.SECP256K1())
+            log.warning("[SIGNER] Using ephemeral key — set ORACLE_PRIVATE_KEY in env!")
+
+        pub = self._private_key.public_key()
+        pub_bytes = pub.public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint,
+        )
+        self.oracle_address = "0x" + hashlib.sha3_256(pub_bytes[1:]).hexdigest()[-40:]
+        log.info(f"[SIGNER] Oracle address: {self.oracle_address}")
+
+    def sign_payload(self, payload_hash_hex: str) -> Dict[str, str]:
+        """
+        Signs a 32-byte keccak hash. Returns {v, r, s} for Solidity ecrecover.
+        In production use eth_account.sign_message for Ethereum-compatible signing.
+        """
+        payload_bytes = bytes.fromhex(payload_hash_hex.removeprefix("0x"))
+        signature_der = self._private_key.sign(payload_bytes, ec.ECDSA(hashes.SHA256()))
+        r_int, s_int = decode_dss_signature(signature_der)
+        return {
+            "v": "0x1c",  # 27 or 28 in Ethereum; simplified here
+            "r": "0x" + r_int.to_bytes(32, "big").hex(),
+            "s": "0x" + s_int.to_bytes(32, "big").hex(),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ZK-PROOF GENERATOR (Simplified Commitment Scheme)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ZKProofGenerator:
+    """
+    Production: use snarkjs + Circom circuits with Groth16 proving scheme.
+    This simplified version generates a commitment hash that proves:
+      - The action happened without revealing beneficiary identity
+      - The volunteer was present at the GPS coordinates
+    """
+
+    def generate_proof(
+        self,
+        volunteer_address: str,
+        beneficiary_address: str,
+        gps: GPSCoordinates,
+        action_type: ActionType,
+        event_id: str,
+    ) -> Dict[str, str]:
+        # Secret: beneficiary identity + salt (never goes on-chain)
+        secret = f"{beneficiary_address}:{uuid.uuid4().hex}"
+        # Public inputs (go on-chain)
+        public_inputs = f"{volunteer_address}:{gps.to_geohash()}:{action_type.value}:{event_id}"
+
+        # Commitment = H(secret || public_inputs) — hides beneficiary identity
+        commitment = hashlib.sha3_256(
+            (secret + public_inputs).encode()
+        ).hexdigest()
+
+        # Nullifier = H(secret) — prevents double-spending same proof
+        nullifier = hashlib.sha3_256(secret.encode()).hexdigest()
+
+        log.info(f"[ZKP] Proof generated | nullifier={nullifier[:16]}...")
+        return {
+            "proof_type":    "commitment_v1",  # "groth16" in production
+            "commitment":    "0x" + commitment,
+            "nullifier":     "0x" + nullifier,
+            "public_inputs": public_inputs,
+            "circuit":       "apex_impact_v1",
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  CORE: IMPACT EVALUATOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ImpactEvaluator:
+    """
+    ⭐ The heart of the SATIN Oracle Engine.
+
+    This class is responsible for:
+      1. Validating the evidence bundle (data integrity checks)
+      2. Running AI analysis (CV + NLP)
+      3. Computing the weighted ImpactScore [0–100]
+      4. Generating a ZK-Proof of beneficial action
+      5. Creating a cryptographic event hash for immutable on-chain anchoring
+      6. Signing the final oracle payload for BenevolenceVault.sol
+
+    Usage:
+        evaluator = ImpactEvaluator()
+        payload = evaluator.evaluate(evidence_bundle)
+    """
+
+    def __init__(
+        self,
+        private_key_hex: Optional[str] = None,
+        cv_analyzer:  Optional[MockCVAnalyzer]  = None,
+        nlp_analyzer: Optional[MockNLPAnalyzer] = None,
+        zk_generator: Optional[ZKProofGenerator] = None,
+    ) -> None:
+        self._signer      = OracleSigner(private_key_hex or os.getenv("ORACLE_PRIVATE_KEY"))
+        self._cv          = cv_analyzer  or MockCVAnalyzer()
+        self._nlp         = nlp_analyzer or MockNLPAnalyzer()
+        self._zkp         = zk_generator or ZKProofGenerator()
+        self._used_nonces: set = set()  # In production: Redis/DB store
+        log.info("ImpactEvaluator initialised ✓")
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def evaluate(self, evidence: EvidenceBundle) -> OraclePayload:
+        """
+        Full evaluation pipeline. Returns a signed OraclePayload ready to be
+        submitted to BenevolenceVault.releaseReward() on-chain.
+
+        Raises:
+            ValueError: If evidence fails integrity checks.
+            RuntimeError: If score is below minimum threshold.
+        """
+        log.info(f"{'═'*60}")
+        log.info(f"Evaluating impact event for {evidence.volunteer_address}")
+        log.info(f"Action: {evidence.action_type.value} | People: {evidence.people_helped}")
+
+        # ── Step 1: Validate evidence ────────────────────────────────────────
+        self._validate_evidence(evidence)
+
+        # ── Step 2: AI Analysis ──────────────────────────────────────────────
+        cv_result  = self._cv.analyze(evidence.ipfs_cid, evidence.action_type, asdict(evidence))
+        nlp_result = self._nlp.analyze(evidence.description, evidence.action_type)
+
+        # ── Step 3: Compute ImpactScore ──────────────────────────────────────
+        breakdown = self._calculate_impact_score(evidence, cv_result, nlp_result)
+        log.info(f"ImpactScore: {breakdown.composite_score:.2f}/100 "
+                 f"| Reward: {breakdown.token_reward:.4f} APEX")
+
+        if breakdown.composite_score < MIN_SCORE_THRESHOLD:
+            raise RuntimeError(
+                f"Score {breakdown.composite_score:.1f} below threshold {MIN_SCORE_THRESHOLD}. "
+                "Evidence insufficient for reward release."
+            )
+
+        # ── Step 4: Generate ZK-Proof ────────────────────────────────────────
+        event_id  = str(uuid.uuid4())
+        zkp       = self._zkp.generate_proof(
+            evidence.volunteer_address,
+            evidence.beneficiary_address,
+            evidence.gps,
+            evidence.action_type,
+            event_id,
+        )
+
+        # ── Step 5: Generate cryptographic event hash ────────────────────────
+        event_hash = self._generate_event_hash(evidence, breakdown, zkp["commitment"])
+
+        # ── Step 6: Build & sign oracle payload ──────────────────────────────
+        now    = int(time.time())
+        nonce  = uuid.uuid4().hex
+        self._used_nonces.add(nonce)
+
+        payload = OraclePayload(
+            event_id            = event_id,
+            volunteer_address   = evidence.volunteer_address,
+            beneficiary_address = evidence.beneficiary_address,
+            impact_score        = breakdown.composite_score,
+            token_reward        = breakdown.token_reward,
+            zk_proof_hash       = zkp["commitment"],
+            event_hash          = event_hash,
+            nonce               = nonce,
+            issued_at           = now,
+            expires_at          = now + ORACLE_EXPIRY_SECS,
+            status              = VerificationStatus.VERIFIED,
+            score_breakdown     = {
+                "urgency":            breakdown.urgency_score,
+                "difficulty":         breakdown.difficulty_score,
+                "reach":              breakdown.reach_score,
+                "authenticity":       breakdown.authenticity_score,
+                "location_multiplier": breakdown.location_multiplier,
+            },
+            oracle_address      = self._signer.oracle_address,
+        )
+
+        # Sign the hash of the payload
+        signing_hash = self._build_signing_hash(payload)
+        payload.signature = self._signer.sign_payload(signing_hash)
+
+        log.info(f"✅ Payload signed | event_id={event_id} | hash={event_hash[:20]}...")
+        log.info(f"{'═'*60}")
+        return payload
+
+    # ── Private Helpers ───────────────────────────────────────────────────────
+
+    def _validate_evidence(self, e: EvidenceBundle) -> None:
+        """Integrity checks before any computation."""
+        errors: List[str] = []
+
+        if not e.ipfs_cid or len(e.ipfs_cid) < 10:
+            errors.append("Invalid IPFS CID")
+        if not e.hash_sha256 or len(e.hash_sha256) != 64:
+            errors.append("Invalid SHA-256 hash (must be 64 hex chars)")
+        if e.people_helped < 1:
+            errors.append("people_helped must be ≥ 1")
+        if e.gps.accuracy_meters > 100:
+            errors.append(f"GPS accuracy too low: {e.gps.accuracy_meters}m (max 100m)")
+        if e.action_type not in ActionType.__members__.values():
+            errors.append(f"Unknown action_type: {e.action_type}")
+
+        # Validate EVM address format
+        for field_name, addr in [("volunteer", e.volunteer_address),
+                                  ("beneficiary", e.beneficiary_address)]:
+            if len(addr) != 42 or not addr.startswith("0x"):
+                errors.append(f"Invalid {field_name} address: {addr}")
+
+        if errors:
+            raise ValueError(f"Evidence validation failed: {'; '.join(errors)}")
+        log.info(f"[VALIDATE] Evidence bundle passed all {3 + len(errors)} checks ✓")
+
+    def _calculate_impact_score(
+        self,
+        evidence:   EvidenceBundle,
+        cv_result:  Dict[str, float],
+        nlp_result: Dict[str, float],
+    ) -> ImpactScoreBreakdown:
+        """
+        Computes the weighted composite ImpactScore.
+
+        Urgency (35%):    Based on geographic crisis level + action urgency.
+        Difficulty (25%): How hard the action was to perform.
+        Reach (20%):      Logarithmic scale of people helped.
+        Authenticity (20%): AI confidence that the event is real.
+        """
+        # Urgency [0–10]
+        crisis_level  = COUNTRY_CRISIS_MULTIPLIER.get(evidence.country_iso, 1.0)
+        base_urgency  = {
+            ActionType.DISASTER_RELIEF:  10.0,
+            ActionType.MEDICAL_AID:       9.5,
+            ActionType.CLEAN_WATER:       9.0,
+            ActionType.FOOD_DISTRIBUTION: 8.5,
+            ActionType.SHELTER:           8.0,
+            ActionType.MENTAL_HEALTH:     7.0,
+            ActionType.ECONOMIC_EMPOWERMENT: 6.5,
+            ActionType.EDUCATION:         6.0,
+            ActionType.ENVIRONMENTAL:     5.5,
+            ActionType.CUSTOM:            5.0,
+        }.get(evidence.action_type, 5.0)
+        urgency = min(10.0, base_urgency * (crisis_level / 2.0 + 0.5))
+
+        # Difficulty [0–10]
+        difficulty = ACTION_DIFFICULTY_BASE.get(evidence.action_type, 5.0)
+
+        # Reach [0–10] — logarithmic: 1 person=0, 1000 people≈10
+        reach = min(10.0, math.log2(evidence.people_helped + 1) / math.log2(1001) * 10)
+
+        # Authenticity [0–10] — composite of CV + NLP confidence
+        cv_conf    = cv_result.get("confidence", 0.5)
+        nlp_sent   = nlp_result.get("sentiment_score", 0.5)
+        nlp_cred   = nlp_result.get("credibility", 0.5)
+        authenticity = ((cv_conf * 0.6) + (nlp_sent * 0.2) + (nlp_cred * 0.2)) * 10
+
+        # Location multiplier
+        loc_mult = COUNTRY_CRISIS_MULTIPLIER.get(evidence.country_iso, 1.0)
+
+        # Weighted composite [0–100] before location multiplier
+        raw_score = (
+            urgency      * SCORE_WEIGHTS["urgency"]      * 10 +
+            difficulty   * SCORE_WEIGHTS["difficulty"]   * 10 +
+            reach        * SCORE_WEIGHTS["reach"]        * 10 +
+            authenticity * SCORE_WEIGHTS["authenticity"] * 10
+        )
+
+        # Apply location multiplier (capped at 100)
+        composite = min(100.0, round(raw_score * (loc_mult ** 0.3), 4))
+
+        # Token reward
+        token_reward = round(
+            BASE_TOKEN_REWARD * (composite / 100.0) * (loc_mult ** 0.5),
+            6
+        )
+
+        return ImpactScoreBreakdown(
+            urgency_score       = round(urgency, 4),
+            difficulty_score    = round(difficulty, 4),
+            reach_score         = round(reach, 4),
+            authenticity_score  = round(authenticity, 4),
+            location_multiplier = round(loc_mult, 4),
+            composite_score     = composite,
+            token_reward        = token_reward,
+        )
+
+    def _generate_event_hash(
+        self,
+        evidence:      EvidenceBundle,
+        breakdown:     ImpactScoreBreakdown,
+        zk_commitment: str,
+    ) -> str:
+        """
+        Creates a deterministic, immutable fingerprint of the entire impact event.
+        This hash is stored on-chain and can never be altered.
+        """
+        canonical = {
+            "ipfs_cid":           evidence.ipfs_cid,
+            "evidence_sha256":    evidence.hash_sha256,
+            "volunteer_address":  evidence.volunteer_address,
+            "action_type":        evidence.action_type.value,
+            "people_helped":      evidence.people_helped,
+            "gps_geohash":        evidence.gps.to_geohash(),
+            "gps_timestamp":      evidence.gps.timestamp_unix,
+            "country_iso":        evidence.country_iso,
+            "impact_score":       str(breakdown.composite_score),
+            "token_reward":       str(breakdown.token_reward),
+            "zk_commitment":      zk_commitment,
+        }
+        canonical_str = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+        return "0x" + hashlib.sha3_256(canonical_str.encode()).hexdigest()
+
+    def _build_signing_hash(self, payload: OraclePayload) -> str:
+        """
+        Builds the digest the oracle signs.
+        Mirrors the Solidity abi.encodePacked + keccak256 computation in BenevolenceVault.sol.
+        """
+        signing_data = (
+            f"{payload.event_id}"
+            f"{payload.volunteer_address}"
+            f"{payload.beneficiary_address}"
+            f"{int(payload.impact_score * 100)}"
+            f"{int(payload.token_reward * 10**18)}"
+            f"{payload.zk_proof_hash}"
+            f"{payload.event_hash}"
+            f"{payload.nonce}"
+            f"{payload.expires_at}"
+        )
+        return hashlib.sha3_256(signing_data.encode()).hexdigest()
+
+    def generate_batch_report(self, payloads: List[OraclePayload]) -> Dict[str, Any]:
+        """Aggregate statistics across multiple impact events."""
+        if not payloads:
+            return {}
+        scores   = [p.impact_score for p in payloads]
+        rewards  = [p.token_reward for p in payloads]
+        verified = [p for p in payloads if p.status == VerificationStatus.VERIFIED]
+        return {
+            "total_events":      len(payloads),
+            "verified_events":   len(verified),
+            "rejection_rate":    round(1 - len(verified)/len(payloads), 4),
+            "avg_impact_score":  round(sum(scores)  / len(scores),  4),
+            "total_tokens_dist": round(sum(rewards), 6),
+            "max_impact_score":  max(scores),
+            "min_impact_score":  min(scores),
+            "report_hash":       "0x" + hashlib.sha3_256(
+                json.dumps([p.event_hash for p in payloads]).encode()
+            ).hexdigest(),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  DEMO / SMOKE TEST
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _demo_run() -> None:
+    print("\n" + "═"*65)
+    print("  APEX HUMANITY — SATIN Impact Engine  •  Demo Run")
+    print("═"*65 + "\n")
+
+    evaluator = ImpactEvaluator()
+
+    evidence = EvidenceBundle(
+        ipfs_cid            = "QmXyZ9f3k1nAbc7dEf9gHiJkLmNoPqRsTuVwXyZ0123456",
+        evidence_type       = "image",
+        hash_sha256         = "a" * 64,
+        gps                 = GPSCoordinates(
+            latitude         = 6.369028,
+            longitude        = 34.885657,
+            altitude         = 1200.0,
+            accuracy_meters  = 8.5,
+        ),
+        action_type         = ActionType.FOOD_DISTRIBUTION,
+        people_helped       = 250,
+        volunteer_address   = "0xAbCdEf1234567890AbCdEf1234567890AbCdEf12",
+        beneficiary_address = "0xDeadBeef0000000000000000000000000000cafe",
+        country_iso         = "SS",  # South Sudan — high crisis multiplier
+        description         = (
+            "Distributed 500kg of emergency food rations to 250 displaced families "
+            "at the Bor IDP camp after the recent flooding. Each family received "
+            "7-day supply. Medical screening also conducted."
+        ),
+    )
+
+    try:
+        payload = evaluator.evaluate(evidence)
+        print(json.dumps({
+            "event_id":     payload.event_id,
+            "status":       payload.status,
+            "impact_score": payload.impact_score,
+            "token_reward": f"{payload.token_reward} APEX",
+            "oracle":       payload.oracle_address,
+            "zk_proof":     payload.zk_proof_hash[:30] + "...",
+            "event_hash":   payload.event_hash[:30] + "...",
+            "signature":    {k: v[:16]+"..." for k, v in payload.signature.items()},
+            "score_breakdown": payload.score_breakdown,
+            "contract_args": {
+                k: str(v)[:30] if isinstance(v, str) else v
+                for k, v in payload.to_contract_args().items()
+            },
+        }, indent=2))
+    except (ValueError, RuntimeError) as e:
+        print(f"❌ Evaluation failed: {e}")
+
+
+if __name__ == "__main__":
+    _demo_run()

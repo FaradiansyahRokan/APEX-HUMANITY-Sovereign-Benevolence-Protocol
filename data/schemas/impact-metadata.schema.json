@@ -1,0 +1,427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apex-humanity.io/schemas/impact-metadata.v1.json",
+  "title": "APEX HUMANITY — Impact Metadata Schema v1.0",
+  "description": "Canonical data structure for a Proof of Beneficial Action (PoBA) event. This schema defines the immutable evidence bundle submitted to the SATIN Oracle for verification and ultimately anchored on-chain.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "action_type",
+    "volunteer",
+    "evidence",
+    "gps",
+    "impact_claim",
+    "timestamps",
+    "oracle_result"
+  ],
+
+  "properties": {
+
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Schema version for forward compatibility"
+    },
+
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Globally unique identifier for this impact event (UUID v4)"
+    },
+
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "food_distribution",
+        "medical_aid",
+        "disaster_relief",
+        "education",
+        "shelter",
+        "clean_water",
+        "environmental",
+        "mental_health",
+        "economic_empowerment",
+        "custom"
+      ],
+      "description": "Category of the beneficial action performed"
+    },
+
+    "volunteer": {
+      "type": "object",
+      "description": "Identity of the person who performed the beneficial action",
+      "required": ["evm_address", "sovereign_id_token"],
+      "properties": {
+        "evm_address": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{40}$",
+          "description": "Ethereum-compatible wallet address of the volunteer"
+        },
+        "sovereign_id_token": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "SovereignID NFT token ID bound to this wallet"
+        },
+        "did_document_cid": {
+          "type": "string",
+          "description": "IPFS CID of the W3C DID document (optional public profile)"
+        },
+        "is_verified_human": {
+          "type": "boolean",
+          "description": "True if wallet has Proof-of-Humanity / Worldcoin verification"
+        }
+      }
+    },
+
+    "beneficiary": {
+      "type": "object",
+      "description": "Identity of the aid recipient — may be ZK-anonymised",
+      "properties": {
+        "zk_commitment": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{64}$",
+          "description": "ZK commitment hash. Proves a real person was helped without revealing identity."
+        },
+        "zk_nullifier": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{64}$",
+          "description": "Nullifier hash — prevents same beneficiary from being double-counted."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of people helped in this event (beneficiary count)"
+        },
+        "age_group": {
+          "type": "string",
+          "enum": ["child", "youth", "adult", "elderly", "mixed"],
+          "description": "Demographic information (optional, for impact analysis)"
+        },
+        "vulnerability_tier": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"],
+          "description": "Assessed vulnerability level of beneficiary group"
+        }
+      }
+    },
+
+    "evidence": {
+      "type": "object",
+      "description": "Cryptographically bound proof artifacts",
+      "required": ["ipfs_cid", "evidence_type", "hash_sha256"],
+      "properties": {
+        "ipfs_cid": {
+          "type": "string",
+          "minLength": 10,
+          "description": "IPFS Content Identifier of the encrypted evidence bundle"
+        },
+        "ipfs_gateway_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Fallback HTTP URL for evidence retrieval"
+        },
+        "evidence_type": {
+          "type": "string",
+          "enum": ["image", "video", "iot_data", "document", "multi"],
+          "description": "Format of the primary evidence"
+        },
+        "hash_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA-256 hash of the raw evidence file before IPFS upload"
+        },
+        "encryption": {
+          "type": "object",
+          "properties": {
+            "algorithm": { "type": "string", "const": "AES-256-GCM" },
+            "key_cid":   {
+              "type": "string",
+              "description": "IPFS CID of encrypted decryption key (oracle has access)"
+            }
+          }
+        },
+        "media_metadata": {
+          "type": "object",
+          "properties": {
+            "duration_seconds":   { "type": "number" },
+            "resolution":         { "type": "string", "example": "1920x1080" },
+            "file_size_bytes":    { "type": "integer" },
+            "capture_device":     { "type": "string" },
+            "device_fingerprint": { "type": "string", "description": "Hardware ID hash" }
+          }
+        }
+      }
+    },
+
+    "gps": {
+      "type": "object",
+      "description": "GPS location proof — where the action occurred",
+      "required": ["latitude", "longitude", "timestamp_unix"],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum":  90
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum":  180
+        },
+        "altitude": {
+          "type": "number",
+          "description": "Altitude in meters above sea level"
+        },
+        "accuracy_meters": {
+          "type": "number",
+          "maximum": 100,
+          "description": "GPS accuracy radius in meters. Must be ≤ 100m."
+        },
+        "timestamp_unix": {
+          "type": "integer",
+          "description": "Unix timestamp (seconds) when GPS coordinates were recorded"
+        },
+        "geohash": {
+          "type": "string",
+          "description": "Deterministic geohash for on-chain location commitment"
+        },
+        "country_iso": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 3,
+          "description": "ISO 3166-1 alpha-2 or alpha-3 country code"
+        },
+        "iot_signed": {
+          "type": "boolean",
+          "description": "True if GPS data was cryptographically signed by a Chainlink IoT node"
+        },
+        "chainlink_job_id": {
+          "type": "string",
+          "description": "Chainlink oracle job ID for GPS verification (if applicable)"
+        }
+      }
+    },
+
+    "impact_claim": {
+      "type": "object",
+      "description": "The volunteer's description of the impact they delivered",
+      "required": ["description", "people_helped"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 50,
+          "maxLength": 2000,
+          "description": "Free-text description of the action and its impact"
+        },
+        "people_helped": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Self-reported number of people directly helped"
+        },
+        "resources_distributed": {
+          "type": "array",
+          "description": "List of resources/goods distributed",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item":     { "type": "string" },
+              "quantity": { "type": "number" },
+              "unit":     { "type": "string", "enum": ["kg", "liters", "units", "sets", "doses"] }
+            }
+          }
+        },
+        "partner_organizations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "NGOs or organizations that participated (adds credibility)"
+        },
+        "duration_hours": {
+          "type": "number",
+          "minimum": 0.5,
+          "description": "Hours spent on the beneficial action"
+        }
+      }
+    },
+
+    "timestamps": {
+      "type": "object",
+      "description": "Full timestamp audit trail",
+      "required": ["action_started_at", "action_ended_at", "submitted_at"],
+      "properties": {
+        "action_started_at": {
+          "type": "integer",
+          "description": "Unix timestamp when the action began"
+        },
+        "action_ended_at": {
+          "type": "integer",
+          "description": "Unix timestamp when the action completed"
+        },
+        "submitted_at": {
+          "type": "integer",
+          "description": "Unix timestamp when the volunteer submitted the proof"
+        },
+        "oracle_processed_at": {
+          "type": "integer",
+          "description": "Unix timestamp when SATIN Oracle finished verification"
+        },
+        "chain_confirmed_at": {
+          "type": "integer",
+          "description": "Unix timestamp of on-chain transaction confirmation"
+        }
+      }
+    },
+
+    "oracle_result": {
+      "type": "object",
+      "description": "SATIN Oracle verification output — populated after AI verification",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "VERIFIED", "REJECTED", "REQUIRES_REVIEW"]
+        },
+        "impact_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Composite ImpactScore computed by SATIN Engine"
+        },
+        "score_breakdown": {
+          "type": "object",
+          "properties": {
+            "urgency_score":       { "type": "number", "minimum": 0, "maximum": 10 },
+            "difficulty_score":    { "type": "number", "minimum": 0, "maximum": 10 },
+            "reach_score":         { "type": "number", "minimum": 0, "maximum": 10 },
+            "authenticity_score":  { "type": "number", "minimum": 0, "maximum": 10 },
+            "location_multiplier": { "type": "number", "minimum": 1.0 }
+          }
+        },
+        "token_reward": {
+          "type": "number",
+          "description": "APEX tokens to be minted as reward"
+        },
+        "zk_proof": {
+          "type": "object",
+          "description": "Zero-Knowledge Proof data",
+          "properties": {
+            "proof_type":    { "type": "string", "enum": ["commitment_v1", "groth16", "plonk"] },
+            "commitment":    { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" },
+            "nullifier":     { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" },
+            "public_inputs": { "type": "string" },
+            "circuit":       { "type": "string" }
+          }
+        },
+        "event_hash": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{64}$",
+          "description": "SHA-3 hash of the entire event — stored immutably on-chain"
+        },
+        "oracle_address": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{40}$",
+          "description": "Ethereum address of the SATIN Oracle signer"
+        },
+        "oracle_signature": {
+          "type": "object",
+          "description": "ECDSA signature for BenevolenceVault.releaseReward()",
+          "properties": {
+            "v": { "type": "string" },
+            "r": { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" },
+            "s": { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" }
+          }
+        },
+        "nonce": {
+          "type": "string",
+          "description": "One-time nonce for anti-replay protection"
+        },
+        "issued_at":  { "type": "integer" },
+        "expires_at": { "type": "integer" },
+        "cv_analysis": {
+          "type": "object",
+          "properties": {
+            "confidence":    { "type": "number", "minimum": 0, "maximum": 1 },
+            "model_version": { "type": "string" }
+          }
+        },
+        "nlp_analysis": {
+          "type": "object",
+          "properties": {
+            "sentiment_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "credibility":     { "type": "number", "minimum": 0, "maximum": 1 },
+            "emotion":         { "type": "string" },
+            "model_version":   { "type": "string" }
+          }
+        },
+        "rejection_reason": {
+          "type": "string",
+          "description": "Human-readable reason if status is REJECTED"
+        }
+      }
+    },
+
+    "blockchain": {
+      "type": "object",
+      "description": "On-chain settlement data — populated after transaction confirmation",
+      "properties": {
+        "chain_id":      { "type": "integer", "description": "EVM chain ID (137 = Polygon)" },
+        "tx_hash":       { "type": "string", "pattern": "^0x[a-fA-F0-9]{64}$" },
+        "block_number":  { "type": "integer" },
+        "vault_address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" },
+        "token_address": { "type": "string", "pattern": "^0x[a-fA-F0-9]{40}$" }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "schema_version": "1.0.0",
+      "event_id": "550e8400-e29b-41d4-a716-446655440000",
+      "action_type": "food_distribution",
+      "volunteer": {
+        "evm_address": "0xabcdef1234567890abcdef1234567890abcdef12",
+        "sovereign_id_token": 42,
+        "is_verified_human": true
+      },
+      "beneficiary": {
+        "zk_commitment": "0xa1b2c3d4e5f60000000000000000000000000000000000000000000000000001",
+        "zk_nullifier":  "0xdeadbeef00000000000000000000000000000000000000000000000000000002",
+        "count": 250,
+        "vulnerability_tier": "critical"
+      },
+      "evidence": {
+        "ipfs_cid": "QmXyZ9f3k1nAbc7dEf9gHiJkLmNoPqRsTuVwXyZ0123456",
+        "evidence_type": "video",
+        "hash_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "gps": {
+        "latitude": 6.369028,
+        "longitude": 34.885657,
+        "accuracy_meters": 8.5,
+        "timestamp_unix": 1700000000,
+        "country_iso": "SS",
+        "iot_signed": true
+      },
+      "impact_claim": {
+        "description": "Distributed 500kg of emergency food rations to 250 displaced families at Bor IDP camp.",
+        "people_helped": 250,
+        "duration_hours": 6.5
+      },
+      "timestamps": {
+        "action_started_at": 1699993600,
+        "action_ended_at":   1700007200,
+        "submitted_at":      1700009000
+      },
+      "oracle_result": {
+        "status": "VERIFIED",
+        "impact_score": 87.45,
+        "token_reward": 87.45,
+        "score_breakdown": {
+          "urgency_score": 9.2,
+          "difficulty_score": 7.0,
+          "reach_score": 8.3,
+          "authenticity_score": 8.5,
+          "location_multiplier": 2.0
+        }
+      }
+    }
+  ]
+}

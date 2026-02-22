@@ -1,0 +1,22 @@
+{
+  "name": "apex-humanity-contracts",
+  "version": "1.0.0",
+  "description": "APEX HUMANITY Smart Contracts — Sovereign Benevolence Protocol",
+  "private": true,
+  "scripts": {
+    "compile":  "hardhat compile",
+    "test":     "hardhat test",
+    "coverage": "hardhat coverage",
+    "deploy:local":   "hardhat run scripts/deploy.js --network localhost",
+    "deploy:mumbai":  "hardhat run scripts/deploy.js --network polygon_mumbai",
+    "deploy:polygon": "hardhat run scripts/deploy.js --network polygon_mainnet",
+    "node":     "hardhat node",
+    "verify":   "hardhat verify"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts":          "^5.0.2",
+    "dotenv":                           "^16.4.5",
+    "hardhat":                          "^2.22.5"
+  }
+}

@@ -1,0 +1,104 @@
+version: "3.9"
+
+# APEX HUMANITY — Full Stack Docker Compose
+# Starts: Oracle API, PostgreSQL, Redis, Frontend (dev mode)
+
+services:
+  # ── SATIN Oracle API ──────────────────────────────────────────────────────
+  oracle:
+    build:
+      context: ./oracle
+      dockerfile: Dockerfile
+    container_name: satin-oracle
+    ports:
+      - "8000:8000"
+    environment:
+      - ORACLE_PRIVATE_KEY_HEX=${ORACLE_PRIVATE_KEY_HEX}
+      - SATIN_API_KEYS=${SATIN_API_KEYS:-dev-key-apex-humanity}
+      - DATABASE_URL=postgresql://apex:apex_secret@postgres:5432/apex_humanity
+      - REDIS_URL=redis://redis:6379/0
+      - IPFS_GATEWAY=${IPFS_GATEWAY:-https://ipfs.io/ipfs/}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./oracle:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Frontend (Next.js) ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: apex-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_ORACLE_URL=http://localhost:8000
+      - NEXT_PUBLIC_VAULT_ADDRESS=${VAULT_ADDRESS}
+      - NEXT_PUBLIC_GOOD_TOKEN_ADDRESS=${GOOD_TOKEN_ADDRESS}
+      - NEXT_PUBLIC_LEDGER_ADDRESS=${LEDGER_ADDRESS}
+      - NEXT_PUBLIC_USDC_ADDRESS=${USDC_ADDRESS}
+      - NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=${WALLETCONNECT_PROJECT_ID}
+      - NEXT_PUBLIC_SATIN_API_KEY=${SATIN_API_KEYS:-dev-key-apex-humanity}
+    depends_on:
+      - oracle
+    restart: unless-stopped
+
+  # ── PostgreSQL (Oracle event store) ──────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: apex-postgres
+    environment:
+      POSTGRES_USER: apex
+      POSTGRES_PASSWORD: apex_secret
+      POSTGRES_DB: apex_humanity
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis (Oracle cache & rate limiting) ─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: apex-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # ── Hardhat Node (local blockchain for dev) ───────────────────────────────
+  hardhat:
+    image: node:20-alpine
+    container_name: apex-hardhat
+    working_dir: /app
+    command: sh -c "npm install && npx hardhat node"
+    ports:
+      - "8545:8545"
+    volumes:
+      - .:/app
+    profiles:
+      - dev  # Only starts with: docker compose --profile dev up
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: apex_humanity_network
