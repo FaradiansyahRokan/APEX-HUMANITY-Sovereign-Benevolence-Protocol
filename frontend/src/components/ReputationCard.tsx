@@ -1,30 +1,20 @@
 "use client";
 
-import { useReadContract } from "wagmi";
-import { formatUnits } from "viem";
-import { REPUTATION_LEDGER_ABI, IMPACT_TOKEN_ABI } from "../utils/abis";
+import { useReadContract, useBalance } from "wagmi";
+import { REPUTATION_LEDGER_ABI } from "../utils/abis";
 import { CONTRACTS, getRank, REPUTATION_RANKS } from "../utils/constants";
 
-interface Props { address: string; reputationScore: number; }
-
-const colorVars: Record<string, { accent: string; border: string; bg: string }> = {
-  gray:    { accent: "#9A9490", border: "rgba(154,148,144,0.2)", bg: "rgba(154,148,144,0.05)" },
-  blue:    { accent: "#60A5FA", border: "rgba(96,165,250,0.2)",  bg: "rgba(96,165,250,0.05)"  },
-  purple:  { accent: "#A78BFA", border: "rgba(167,139,250,0.2)", bg: "rgba(167,139,250,0.05)" },
-  gold:    { accent: "#C9A84C", border: "rgba(201,168,76,0.25)", bg: "rgba(201,168,76,0.06)"  },
-  rainbow: { accent: "#00D4FF", border: "rgba(0,212,255,0.25)",  bg: "rgba(0,212,255,0.06)"   },
-};
+interface Props { address:string; reputationScore:number; }
 
 export default function ReputationCard({ address, reputationScore }: Props) {
-  const rank       = getRank(reputationScore);
-  const cv         = colorVars[rank.color] ?? colorVars.gray;
-  const rankIdx    = REPUTATION_RANKS.findIndex((r) => r.rank === rank.rank);
-  const nextRank   = REPUTATION_RANKS[rankIdx + 1];
-  const progress   = nextRank
-    ? Math.min(((reputationScore - rank.threshold) / (nextRank.threshold - rank.threshold)) * 100, 100)
+  const rank  = getRank(reputationScore);
+  const rIdx  = REPUTATION_RANKS.findIndex(r=>r.rank===rank.rank);
+  const next  = REPUTATION_RANKS[rIdx+1];
+  const pct   = next
+    ? Math.min(((reputationScore-rank.threshold)/(next.threshold-rank.threshold))*100,100)
     : 100;
 
-  const { data: repData } = useReadContract({
+  const { data:rep  } = useReadContract({
     address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
     abi: REPUTATION_LEDGER_ABI,
     functionName: "getReputation",
@@ -32,21 +22,13 @@ export default function ReputationCard({ address, reputationScore }: Props) {
     query: { refetchInterval: 8_000 },
   });
 
-  const { data: goodBalance } = useReadContract({
-    address: CONTRACTS.GOOD_TOKEN as `0x${string}`,
-    abi: IMPACT_TOKEN_ABI,
-    functionName: "balanceOf",
-    args: [address as `0x${string}`],
-    query: { refetchInterval: 8_000 },
+  // ── v2.0: GOOD adalah native coin — pakai useBalance, bukan readContract ──
+  const { data:goodBalance } = useBalance({
+    address: address as `0x${string}`,
+    query:   { refetchInterval: 8_000 },
   });
 
-  const { data: totalSupply } = useReadContract({
-    address: CONTRACTS.GOOD_TOKEN as `0x${string}`,
-    abi: IMPACT_TOKEN_ABI,
-    functionName: "totalSupply",
-  });
-
-  const { data: history } = useReadContract({
+  const { data:hist } = useReadContract({
     address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
     abi: REPUTATION_LEDGER_ABI,
     functionName: "getScoreHistory",
@@ -54,173 +36,211 @@ export default function ReputationCard({ address, reputationScore }: Props) {
     query: { refetchInterval: 8_000 },
   });
 
-  const cumScore = repData ? Number((repData as any)[0]) / 100 : reputationScore;
-  const eventCount  = repData ? Number((repData as any)[1]) : 0;
-  const lastUpdated = repData ? Number((repData as any)[2]) : 0;
+  const score   = rep ? Number((rep as any)[0])/100 : reputationScore;
+  const events  = rep ? Number((rep as any)[1]) : 0;
+  const lastUpd = rep ? Number((rep as any)[2]) : 0;
 
+  // Native balance dari useBalance
   const goodFmt = goodBalance
-    ? Number(formatUnits(goodBalance as bigint, 18)).toLocaleString("en-US", { maximumFractionDigits: 2 })
+    ? Number(goodBalance.formatted).toLocaleString("en-US", { maximumFractionDigits: 2 })
     : "0";
 
-  const ownershipPct = goodBalance && totalSupply && (totalSupply as bigint) > 0n
-    ? ((Number(goodBalance as bigint) / Number(totalSupply as bigint)) * 100).toFixed(3)
-    : "0.000";
-
-  const scoreHistory = (history as any[]) ?? [];
-  const recent = [...scoreHistory].reverse().slice(0, 5);
-  const lastActive = lastUpdated > 0
-    ? new Date(lastUpdated * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  const history = (hist as any[]) ?? [];
+  const recent  = [...history].reverse().slice(0, 5);
+  const lastDate = lastUpd > 0
+    ? new Date(lastUpd*1000).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" })
     : "Never";
 
   return (
-    <div className="space-y-3">
+    <div style={{display:"flex", flexDirection:"column", gap:"10px"}}>
 
-      {/* ── Identity Card ────────────────────────────────────────────────────── */}
-      <div className="rounded-2xl overflow-hidden"
-        style={{ background: cv.bg, border: `1px solid ${cv.border}` }}>
+      {/* ═══ Identity ═══ */}
+      <div style={{
+        borderRadius:"var(--r3)", overflow:"hidden",
+        border:"1px solid var(--b0)",
+        background:"linear-gradient(160deg, rgba(0,223,162,0.06) 0%, var(--g1) 50%)",
+        boxShadow:"0 0 40px rgba(0,223,162,0.05)",
+      }}>
+        <div style={{height:"2px", background:"linear-gradient(90deg,var(--mi),var(--vi))"}}/>
+        <div style={{padding:"24px"}}>
 
-        {/* Top stripe */}
-        <div className="h-0.5 w-full" style={{
-          background: `linear-gradient(90deg, transparent, ${cv.accent}, transparent)`
-        }} />
+          {/* Avatar + rank + score */}
+          <div style={{display:"grid", gridTemplateColumns:"auto 1fr auto", gap:"16px", alignItems:"flex-start", marginBottom:"26px"}}>
+            <div style={{
+              width:"52px", height:"52px", borderRadius:"14px",
+              background:"linear-gradient(135deg,var(--mi-dim),rgba(0,223,162,0.18))",
+              border:"1px solid var(--mi-edge)",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:"26px", flexShrink:0,
+              boxShadow:"0 0 20px var(--mi-glow)",
+            }}>{rank.icon}</div>
 
-        <div className="p-6">
-          {/* Header row */}
-          <div className="flex items-start justify-between mb-5">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl"
-                style={{ background: "rgba(0,0,0,0.3)", border: `1px solid ${cv.border}` }}>
-                {rank.icon}
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-bold text-base" style={{ color: "var(--text)" }}>{rank.rank}</span>
-                  <span className="mono text-xs px-2 py-0.5 rounded-full"
-                    style={{ background: cv.bg, border: `1px solid ${cv.border}`, color: cv.accent, letterSpacing: "0.08em" }}>
-                    {rank.description}
-                  </span>
-                </div>
-                <p className="mono text-xs" style={{ color: "var(--text-3)" }}>
-                  {address.slice(0, 10)}...{address.slice(-8)}
-                </p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-3xl font-bold" style={{ color: cv.accent, textShadow: `0 0 20px ${cv.border}` }}>
-                {cumScore.toLocaleString("en-US")}
+            <div>
+              <p style={{fontFamily:"'Plus Jakarta Sans',sans-serif", fontWeight:800, fontSize:"17px", color:"var(--t0)", marginBottom:"5px"}}>
+                {rank.rank}
               </p>
-              <p className="text-xs mono" style={{ color: "var(--text-3)" }}>impact points</p>
+              <p className="label">{address.slice(0,10)}…{address.slice(-8)}</p>
+            </div>
+
+            <div style={{textAlign:"right"}}>
+              <p style={{
+                fontFamily:"'JetBrains Mono',monospace",
+                fontSize:"34px", fontWeight:600,
+                color:"var(--mi)", letterSpacing:"-0.025em", lineHeight:1,
+                textShadow:"0 0 28px var(--mi-glow)",
+              }}>
+                {score.toLocaleString("en-US")}
+              </p>
+              <p className="label" style={{marginTop:"4px"}}>impact pts</p>
             </div>
           </div>
 
-          {/* Stats row */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
+          {/* 3-stat row */}
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"22px"}}>
             {[
-              { label: "Events",       value: eventCount.toString(),  color: "var(--text)" },
-              { label: "GOOD Tokens",  value: goodFmt,                color: "var(--emerald)" },
-              { label: "Token Share",  value: `${ownershipPct}%`,     color: "var(--cyan)" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-xl p-3 text-center"
-                style={{ background: "rgba(0,0,0,0.25)", border: "1px solid var(--border)" }}>
-                <p className="font-bold text-lg" style={{ color: s.color }}>{s.value}</p>
-                <p className="text-xs mono mt-0.5" style={{ color: "var(--text-3)" }}>{s.label}</p>
+              { label:"Events", value:events.toString(), color:"var(--mi)" },
+              { label:"GOOD",   value:goodFmt,           color:"var(--go)" },
+            ].map(s=>(
+              <div key={s.label} style={{
+                padding:"14px 12px", borderRadius:"var(--r2)", textAlign:"center",
+                background:"var(--g1)", border:"1px solid var(--b0)",
+              }}>
+                <p style={{
+                  fontFamily:"'JetBrains Mono',monospace",
+                  fontSize:"18px", fontWeight:600, color:s.color,
+                  letterSpacing:"-0.01em", lineHeight:1, marginBottom:"6px",
+                  textShadow:`0 0 16px ${s.color}50`,
+                }}>{s.value}</p>
+                <p className="label">{s.label}</p>
               </div>
             ))}
           </div>
 
-          <p className="mono text-xs mb-4" style={{ color: "var(--text-3)" }}>
-            Last active: <span style={{ color: "var(--text-2)" }}>{lastActive}</span>
+          <p className="label" style={{marginBottom:"18px"}}>
+            Last active:&nbsp;
+            <span style={{fontFamily:"'JetBrains Mono',monospace", color:"var(--t1)", fontWeight:500}}>
+              {lastDate}
+            </span>
           </p>
 
-          {/* Progress bar */}
-          {nextRank ? (
+          {/* Rank progress */}
+          {next ? (
             <div>
-              <div className="flex justify-between mono text-xs mb-2" style={{ color: "var(--text-3)" }}>
-                <span>Next: {nextRank.icon} {nextRank.rank}</span>
-                <span>{cumScore.toLocaleString("en-US")} / {nextRank.threshold.toLocaleString("en-US")}</span>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px"}}>
+                <p className="label">Next rank: {next.icon} {next.rank}</p>
+                <p style={{fontFamily:"'JetBrains Mono',monospace", fontSize:"11px", fontWeight:500, color:"var(--mi)"}}>
+                  {(next.threshold-score).toLocaleString()} pts
+                </p>
               </div>
-              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-                <div className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${cv.accent}, var(--cyan))` }} />
+              <div className="track" style={{height:"5px"}}>
+                <div className="fill-mi" style={{width:`${pct}%`}}/>
               </div>
-              <p className="mono text-xs mt-1.5" style={{ color: "var(--text-3)" }}>
-                {(nextRank.threshold - cumScore).toLocaleString("en-US")} pts remaining
-              </p>
             </div>
           ) : (
-            <div className="text-center py-2.5 rounded-xl mono text-xs"
-              style={{ background: "var(--gold-dim)", border: "1px solid rgba(201,168,76,0.2)", color: "var(--gold)", letterSpacing: "0.08em" }}>
-              ⚡ MAXIMUM RANK — APEX OF HUMANITY
+            <div style={{
+              textAlign:"center", padding:"12px", borderRadius:"var(--r2)",
+              background:"var(--go-dim)", border:"1px solid var(--go-edge)",
+            }}>
+              <p style={{fontFamily:"'JetBrains Mono',monospace", fontSize:"10px", fontWeight:600, color:"var(--go)", letterSpacing:"0.1em"}}>
+                ⚡ MAXIMUM RANK — APEX OF HUMANITY
+              </p>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── GOOD Token Card ──────────────────────────────────────────────────── */}
-      <div className="rounded-2xl p-5"
-        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-        <div className="flex items-center justify-between mb-4">
-          <p className="font-semibold text-sm" style={{ color: "var(--text)" }}>GOOD Token Balance</p>
-          <div className="flex items-center gap-1.5 mono text-xs px-2.5 py-1 rounded-full"
-            style={{ background: "var(--emerald-dim)", border: "1px solid rgba(16,217,136,0.15)", color: "var(--emerald)" }}>
-            <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: "var(--emerald)" }} />
-            LIVE
-          </div>
-        </div>
-
-        <div className="flex items-end gap-2 mb-4">
-          <span className="text-4xl font-bold num-green">{goodFmt}</span>
-          <span className="mono text-sm pb-1" style={{ color: "var(--text-3)" }}>GOOD</span>
-        </div>
-
-        {totalSupply && (totalSupply as bigint) > 0n && (
-          <div className="rounded-xl p-3" style={{ background: "rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
-            <div className="flex justify-between mono text-xs mb-1.5" style={{ color: "var(--text-3)" }}>
-              <span>Share of total supply</span>
-              <span style={{ color: "var(--emerald)" }}>{ownershipPct}%</span>
+      {/* ═══ GOOD Balance (native coin) ═══ */}
+      <div style={{
+        borderRadius:"var(--r3)",
+        border:"1px solid var(--b0)",
+        background:"linear-gradient(160deg,var(--go-deep) 0%,var(--g1) 50%)",
+        overflow:"hidden",
+      }}>
+        <div style={{height:"2px", background:"linear-gradient(90deg,var(--go),var(--go-soft))"}}/>
+        <div style={{padding:"22px 24px"}}>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"18px"}}>
+            <p className="label" style={{color:"var(--go)", opacity:0.8}}>GOOD Balance</p>
+            <div style={{
+              display:"flex", alignItems:"center", gap:"6px",
+              padding:"4px 11px", borderRadius:"99px",
+              background:"var(--mi-dim)", border:"1px solid var(--mi-edge)",
+            }}>
+              <span className="dot dot-mi" style={{width:"4px", height:"4px"}}/>
+              <span style={{fontFamily:"'JetBrains Mono',monospace", fontSize:"8px", fontWeight:600, color:"var(--mi)", letterSpacing:"0.12em"}}>LIVE</span>
             </div>
-            <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-              <div className="h-full rounded-full"
-                style={{ width: `${Math.min(parseFloat(ownershipPct) * 20, 100)}%`,
-                  background: "linear-gradient(90deg, var(--emerald), var(--cyan))" }} />
-            </div>
-            <p className="mono text-xs mt-1.5" style={{ color: "var(--text-3)" }}>
-              Total: {Number(formatUnits(totalSupply as bigint, 18)).toLocaleString("en-US", { maximumFractionDigits: 0 })} GOOD
-            </p>
           </div>
-        )}
-      </div>
 
-      {/* ── Activity History ─────────────────────────────────────────────────── */}
-      {recent.length > 0 ? (
-        <div className="rounded-2xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-          <p className="font-semibold text-sm mb-4" style={{ color: "var(--text)" }}>Recent Activity</p>
-          <div className="space-y-2">
-            {recent.map((e: any, i: number) => {
-              const score = Number(e.score ?? 0);
-              const ts    = Number(e.timestamp ?? 0);
-              const date  = ts > 0 ? new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
-              return (
-                <div key={i} className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-                  style={{ background: "rgba(0,0,0,0.25)", border: "1px solid var(--border)" }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--cyan)" }} />
-                    <span className="mono text-xs" style={{ color: "var(--text-2)" }}>{date}</span>
-                  </div>
-                  <span className="mono text-xs font-semibold num-cyan">+{(score / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })} pts</span>
-                </div>
-              );
-            })}
+          <div style={{display:"flex", alignItems:"flex-end", gap:"9px", marginBottom:"12px"}}>
+            <span style={{
+              fontFamily:"'JetBrains Mono',monospace",
+              fontSize:"44px", fontWeight:600,
+              color:"var(--go)", letterSpacing:"-0.025em", lineHeight:1,
+              textShadow:"0 0 32px var(--go-glow)",
+            }}>{goodFmt}</span>
+            <span style={{
+              fontFamily:"'JetBrains Mono',monospace",
+              fontSize:"14px", color:"rgba(255,189,89,0.45)", paddingBottom:"6px",
+            }}>GOOD</span>
           </div>
-          <p className="mono text-xs mt-3 text-center" style={{ color: "var(--text-3)" }}>
-            {scoreHistory.length} events recorded on-chain
+
+          <p className="label" style={{opacity:0.5}}>
+            Native L1 coin · digunakan untuk gas &amp; transaksi
           </p>
         </div>
-      ) : eventCount === 0 ? (
-        <div className="rounded-2xl p-8 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-          <p className="text-2xl mb-2">◎</p>
-          <p className="text-sm" style={{ color: "var(--text-2)" }}>No events yet</p>
-          <p className="text-xs mt-1" style={{ color: "var(--text-3)" }}>Submit your first impact proof</p>
+      </div>
+
+      {/* ═══ Activity ═══ */}
+      {recent.length > 0 ? (
+        <div style={{
+          borderRadius:"var(--r3)",
+          border:"1px solid var(--b0)",
+          background:"linear-gradient(160deg,var(--vi-deep) 0%,var(--g1) 50%)",
+          overflow:"hidden",
+        }}>
+          <div style={{height:"2px", background:"linear-gradient(90deg,var(--vi),var(--vi-soft))"}}/>
+          <div style={{padding:"22px 24px"}}>
+            <p className="label" style={{marginBottom:"16px", color:"var(--vi)", opacity:0.8}}>On-chain Activity</p>
+            <div style={{display:"flex", flexDirection:"column", gap:"7px"}}>
+              {recent.map((e:any, i:number) => {
+                const s = Number(e.score ?? 0), ts = Number(e.timestamp ?? 0);
+                const d = ts > 0
+                  ? new Date(ts*1000).toLocaleDateString("en-US", { month:"short", day:"numeric" })
+                  : "—";
+                return (
+                  <div key={i} style={{
+                    display:"flex", alignItems:"center", justifyContent:"space-between",
+                    padding:"11px 14px", borderRadius:"var(--r2)",
+                    background:"var(--g1)", border:"1px solid var(--b0)",
+                    transition:"border-color 0.15s",
+                  }}
+                  onMouseEnter={e=>(e.currentTarget as HTMLDivElement).style.borderColor="var(--b1)"}
+                  onMouseLeave={e=>(e.currentTarget as HTMLDivElement).style.borderColor="var(--b0)"}
+                  >
+                    <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
+                      <div style={{
+                        width:"6px", height:"6px", borderRadius:"50%",
+                        background:"var(--vi)", flexShrink:0,
+                        boxShadow:"0 0 8px var(--vi-glow)",
+                      }}/>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace", fontSize:"11px", color:"var(--t1)"}}>{d}</span>
+                    </div>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace", fontSize:"12px", fontWeight:600, color:"var(--mi)"}}>
+                      +{(s/100).toLocaleString("en-US", { maximumFractionDigits:2 })} pts
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="label" style={{textAlign:"center", marginTop:"12px"}}>{history.length} events on-chain</p>
+          </div>
+        </div>
+      ) : events === 0 ? (
+        <div style={{borderRadius:"var(--r3)", border:"1px solid var(--b0)", background:"var(--g0)"}}>
+          <div style={{padding:"48px 24px", textAlign:"center"}}>
+            <p style={{fontSize:"32px", opacity:0.08, marginBottom:"12px"}}>⛓️</p>
+            <p style={{fontSize:"14px", color:"var(--t1)", marginBottom:"5px"}}>No events yet</p>
+            <p className="label">Submit your first impact proof</p>
+          </div>
         </div>
       ) : null}
     </div>

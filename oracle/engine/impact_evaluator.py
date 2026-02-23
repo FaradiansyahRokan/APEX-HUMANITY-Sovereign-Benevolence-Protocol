@@ -405,13 +405,15 @@ def _ecdsa_sign_raw(private_key_int: int, msg_hash_32: bytes):
         V = _hmac.new(K, V,           _hashlib.sha256).digest()
 
 
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from web3 import Web3
 def _keccak256(data: bytes) -> bytes:
     """
     Keccak-256 — Ethereum-compatible (original Keccak padding 0x01,
     NOT NIST SHA-3 padding 0x06).
     """
-    from keccak256 import keccak256 as _keccak256_impl
-    return _keccak256_impl(data)
+    return bytes(Web3.keccak(data))
 
 
 def _eth_signed_message_hash(message_hash: bytes) -> bytes:
@@ -462,28 +464,18 @@ class OracleSigner:
         ).hex()
 
     def sign_payload_hash(self, payload_hash: bytes) -> dict:
-        """
-        Signs a 32-byte keccak256 payload hash the Ethereum way.
-        Returns {"v": int, "r": "0x...", "s": "0x..."}.
-        """
         if len(payload_hash) != 32:
-            raise ValueError("payload_hash must be exactly 32 bytes (keccak256 output)")
-
-        prefixed          = _eth_signed_message_hash(payload_hash)
-        private_key_int   = self._private_key.private_numbers().private_value
-        r, s, y_parity   = _ecdsa_sign_raw(private_key_int, prefixed)
-
-        v = 27 + y_parity
-
-        # EIP-2 / OpenZeppelin: normalise s to lower half of curve
-        if s > _SECP256K1_N_HALF:
-            s = _SECP256K1_N - s
-            v = 27 if v == 28 else 28
-
+            raise ValueError("payload_hash must be 32 bytes")
+    
+        # eth_account handle prefix \x19Ethereum Signed Message:\n32 secara otomatis
+        msg = encode_defunct(payload_hash)
+        private_key_hex = hex(self._private_key.private_numbers().private_value)
+        signed = Account.sign_message(msg, private_key=private_key_hex)
+        
         return {
-            "v": v,
-            "r": "0x" + r.to_bytes(32, "big").hex(),
-            "s": "0x" + s.to_bytes(32, "big").hex(),
+            "v": signed.v,
+            "r": "0x" + signed.r.to_bytes(32, "big").hex(),
+            "s": "0x" + signed.s.to_bytes(32, "big").hex(),
         }
 
     def sign(self, data: bytes) -> str:

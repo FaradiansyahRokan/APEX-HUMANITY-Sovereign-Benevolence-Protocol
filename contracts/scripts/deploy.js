@@ -1,111 +1,69 @@
-/**
- * APEX HUMANITY — Deployment Script (Hardhat)
- * Deploys all contracts in the correct dependency order.
- *
- * Usage:
- *   npx hardhat run scripts/deploy.js --network polygon_mumbai
- *   npx hardhat run scripts/deploy.js --network localhost
- */
-
 const { ethers } = require("hardhat");
+const fs = require("fs");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
+  const balance    = await ethers.provider.getBalance(deployer.address);
 
-  console.log("\n╔═══════════════════════════════════════════════════════╗");
-  console.log("║     APEX HUMANITY — Contract Deployment               ║");
-  console.log("╚═══════════════════════════════════════════════════════╝\n");
-  console.log(`Deployer:  ${deployer.address}`);
-  console.log(`Balance:   ${ethers.formatEther(await deployer.provider.getBalance(deployer.address))} ETH\n`);
+  console.log("╔═══════════════════════════════════════════════════════╗");
+  console.log("║     APEX HUMANITY — Contract Deployment v2.0          ║");
+  console.log("║     Native Token Minting (GOOD = L1 Coin)             ║");
+  console.log("╚═══════════════════════════════════════════════════════╝");
+  console.log("Deployer: ", deployer.address);
+  console.log("Balance:  ", ethers.formatEther(balance), "GOOD\n");
 
-  // ── Step 1: Deploy ImpactToken ─────────────────────────────────────────────
-  console.log("1/5 Deploying ImpactToken (APEX)...");
-  const ImpactToken = await ethers.getContractFactory("ImpactToken");
-  const impactToken = await ImpactToken.deploy(deployer.address);
-  await impactToken.waitForDeployment();
-  console.log(`   ✅ ImpactToken:       ${await impactToken.getAddress()}`);
-
-  // ── Step 2: Deploy ReputationLedger ───────────────────────────────────────
-  console.log("2/5 Deploying ReputationLedger...");
+  // ── 1. ReputationLedger ──────────────────────────────────────────────────
+  console.log("1/3 Deploying ReputationLedger...");
   const ReputationLedger = await ethers.getContractFactory("ReputationLedger");
   const reputationLedger = await ReputationLedger.deploy(deployer.address);
   await reputationLedger.waitForDeployment();
-  console.log(`   ✅ ReputationLedger:  ${await reputationLedger.getAddress()}`);
+  console.log("   ✅ ReputationLedger: ", await reputationLedger.getAddress());
 
-  // ── Step 3: Deploy SovereignID ────────────────────────────────────────────
-  console.log("3/5 Deploying SovereignID...");
+  // ── 2. SovereignID ───────────────────────────────────────────────────────
+  console.log("2/3 Deploying SovereignID...");
   const SovereignID = await ethers.getContractFactory("SovereignID");
-  const sovereignID = await SovereignID.deploy(
-    deployer.address,
-    await reputationLedger.getAddress()
-  );
+  const sovereignID = await SovereignID.deploy(deployer.address, await reputationLedger.getAddress())
   await sovereignID.waitForDeployment();
-  console.log(`   ✅ SovereignID:       ${await sovereignID.getAddress()}`);
+  console.log("   ✅ SovereignID:      ", await sovereignID.getAddress());
 
-  // ── Step 4: Deploy BenevolenceVault ───────────────────────────────────────
-  // For testnet: use a mock USDC or deploy a test ERC-20
-  const ORACLE_ADDRESS = process.env.ORACLE_ADDRESS || deployer.address;
-
-  console.log("4/5 Deploying MockUSDC...");
-  const MockERC20 = await ethers.getContractFactory("MockERC20");
-  const mockUSDC = await MockERC20.deploy("USD Coin", "USDC", 6);
-  await mockUSDC.waitForDeployment();
-  const STABLECOIN_ADDRESS = await mockUSDC.getAddress();
-  console.log(`   ✅ MockUSDC:          ${STABLECOIN_ADDRESS}`);
-
-  
-
-  console.log("4/5 Deploying BenevolenceVault...");
+  // ── 3. BenevolenceVault (Native Minter) ─────────────────────────────────
+  console.log("3/3 Deploying BenevolenceVault (NativeMinter)...");
   const BenevolenceVault = await ethers.getContractFactory("BenevolenceVault");
-  const vault = await BenevolenceVault.deploy(
-    await impactToken.getAddress(),
-    await reputationLedger.getAddress(),
-    STABLECOIN_ADDRESS,
-    ORACLE_ADDRESS,
-    deployer.address
+  const benevolenceVault = await BenevolenceVault.deploy(
+    await reputationLedger.getAddress(),  // _reputationLedger
+    deployer.address,                      // _oracleAddress (ganti nanti dengan oracle address)
+    deployer.address                       // _daoAdmin
   );
-  await vault.waitForDeployment();
-  console.log(`   ✅ BenevolenceVault:  ${await vault.getAddress()}`);
+  await benevolenceVault.waitForDeployment();
+  console.log("   ✅ BenevolenceVault: ", await benevolenceVault.getAddress());
 
-  // ── Step 5: Wire Permissions ───────────────────────────────────────────────
-  console.log("5/5 Configuring roles and permissions...");
+  // ── 4. Grant Roles ───────────────────────────────────────────────────────
+  console.log("\n4/4 Configuring roles...");
+  const VAULT_ROLE = ethers.keccak256(ethers.toUtf8Bytes("VAULT_ROLE"));
+  await reputationLedger.grantRole(VAULT_ROLE, await benevolenceVault.getAddress());
+  console.log("   ✅ VAULT_ROLE granted to BenevolenceVault on ReputationLedger");
 
-  const MINTER_ROLE = await impactToken.MINTER_ROLE();
-  const VAULT_ROLE  = await reputationLedger.VAULT_ROLE();
-
-  await (await impactToken.grantRole(MINTER_ROLE, await vault.getAddress())).wait();
-  console.log(`   ✅ MINTER_ROLE granted to BenevolenceVault on ImpactToken`);
-
-  await (await reputationLedger.grantRole(VAULT_ROLE, await vault.getAddress())).wait();
-  console.log(`   ✅ VAULT_ROLE granted to BenevolenceVault on ReputationLedger`);
-
-  // ── Deployment Summary ────────────────────────────────────────────────────
-  const deployedAddresses = {
-    ImpactToken:       await impactToken.getAddress(),
-    ReputationLedger:  await reputationLedger.getAddress(),
-    SovereignID:       await sovereignID.getAddress(),
-    BenevolenceVault:  await vault.getAddress(),
-    OracleAddress:     ORACLE_ADDRESS,
-    DeployedAt:        new Date().toISOString(),
-    Network:           (await ethers.provider.getNetwork()).name,
-    ChainId:           String((await ethers.provider.getNetwork()).chainId),
+  // ── Summary ──────────────────────────────────────────────────────────────
+  const addresses = {
+    ReputationLedger: await reputationLedger.getAddress(),
+    SovereignID:      await sovereignID.getAddress(),
+    BenevolenceVault: await benevolenceVault.getAddress(),
+    OracleAddress:    deployer.address,
+    DeployedAt:       new Date().toISOString(),
+    Network:          "apex_local",
+    ChainId:          (await ethers.provider.getNetwork()).chainId.toString(),
+    Note:             "ImpactToken removed — GOOD is now native L1 coin minted via NativeMinter precompile",
   };
 
   console.log("\n╔═══════════════════════════════════════════════════════╗");
   console.log("║              DEPLOYMENT COMPLETE ✅                   ║");
   console.log("╚═══════════════════════════════════════════════════════╝");
-  console.log(JSON.stringify(deployedAddresses, null, 2));
+  console.log(JSON.stringify(addresses, null, 2));
 
-  // Save to file for frontend use
-  const fs = require("fs");
-  fs.writeFileSync(
-    "./deployed-addresses.json",
-    JSON.stringify(deployedAddresses, null, 2)
-  );
+  fs.writeFileSync("./deployed-addresses.json", JSON.stringify(addresses, null, 2));
   console.log("\n📁 Addresses saved to ./deployed-addresses.json");
+  console.log("\n⚠️  PENTING: Update oracle address di BenevolenceVault setelah oracle server jalan:");
+  console.log("   npx hardhat run scripts/set-oracle.js --network apex_local");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main().catch((e) => { console.error(e); process.exit(1); });

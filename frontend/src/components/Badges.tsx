@@ -4,268 +4,179 @@ import { useReadContract } from "wagmi";
 import { REPUTATION_LEDGER_ABI } from "../utils/abis";
 import { CONTRACTS } from "../utils/constants";
 
-const BADGE_META = [
-  { id: 1, icon: "🌱", name: "First Step",    desc: "Submitted your first impact proof",          tier: "common"    },
-  { id: 2, icon: "🤝", name: "Helper",        desc: "Completed 5 verified impact events",          tier: "common"    },
-  { id: 3, icon: "⭐", name: "Dedicated",     desc: "Completed 10 verified impact events",         tier: "rare"      },
-  { id: 4, icon: "⚔️", name: "Champion",      desc: "Completed 25 verified impact events",         tier: "rare"      },
-  { id: 5, icon: "🏆", name: "Legend",        desc: "Completed 50 verified impact events",         tier: "epic"      },
-  { id: 6, icon: "🔥", name: "High Impact",   desc: "Achieved impact score 80+ in a single event", tier: "rare"      },
-  { id: 7, icon: "💯", name: "Perfect Score", desc: "Achieved a perfect 100 impact score",          tier: "epic"      },
-  { id: 8, icon: "🌍", name: "Century",       desc: "Accumulated 10,000+ cumulative impact points", tier: "legendary" },
-  { id: 9, icon: "⚡", name: "Titan",         desc: "Accumulated 50,000+ cumulative impact points", tier: "legendary" },
+const BADGES = [
+  { id:1, icon:"🌱", name:"First Step",   desc:"Submitted your first impact proof",            tier:"common"    },
+  { id:2, icon:"🤝", name:"Helper",        desc:"Completed 5 verified impact events",           tier:"common"    },
+  { id:3, icon:"⭐", name:"Dedicated",     desc:"Completed 10 verified impact events",          tier:"rare"      },
+  { id:4, icon:"⚔️", name:"Champion",      desc:"Completed 25 verified impact events",          tier:"rare"      },
+  { id:5, icon:"🏆", name:"Legend",        desc:"Completed 50 verified impact events",          tier:"epic"      },
+  { id:6, icon:"🔥", name:"High Impact",   desc:"Impact score 80+ in a single event",           tier:"rare"      },
+  { id:7, icon:"💯", name:"Perfect",       desc:"Achieved a perfect 100 impact score",          tier:"epic"      },
+  { id:8, icon:"🌍", name:"Century",       desc:"10,000+ cumulative impact points",             tier:"legendary" },
+  { id:9, icon:"⚡", name:"Titan",         desc:"50,000+ cumulative impact points",             tier:"legendary" },
 ];
 
-const TIER_STYLE: Record<string, { border: string; bg: string; label: string; glow: string }> = {
-  common:    { border: "rgba(154,148,144,0.25)", bg: "rgba(154,148,144,0.06)", label: "#9A9490", glow: "none" },
-  rare:      { border: "rgba(96,165,250,0.3)",   bg: "rgba(96,165,250,0.07)", label: "#60A5FA", glow: "0 0 12px rgba(96,165,250,0.15)" },
-  epic:      { border: "rgba(167,139,250,0.3)",  bg: "rgba(167,139,250,0.07)",label: "#A78BFA", glow: "0 0 16px rgba(167,139,250,0.2)"  },
-  legendary: { border: "rgba(201,168,76,0.35)",  bg: "rgba(201,168,76,0.08)", label: "#C9A84C", glow: "0 0 20px rgba(201,168,76,0.2)"   },
+const TIERS = {
+  common:    { color:"var(--t1)",   dim:"var(--g2)",    edge:"var(--b0)", glow:"none",                dot:"rgba(255,255,255,0.3)"  },
+  rare:      { color:"var(--mi)",   dim:"var(--mi-dim)",edge:"var(--mi-edge)", glow:"0 0 24px var(--mi-glow)", dot:"var(--mi)" },
+  epic:      { color:"var(--vi)",   dim:"var(--vi-dim)",edge:"var(--vi-edge)", glow:"0 0 28px var(--vi-glow)", dot:"var(--vi)" },
+  legendary: { color:"var(--go)",   dim:"var(--go-dim)",edge:"var(--go-edge)", glow:"0 0 32px var(--go-glow)", dot:"var(--go)" },
 };
 
-function formatDate(ts: number): string {
-  if (!ts) return "";
-  return new Date(ts * 1000).toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-  });
+function fmtDate(ts:number) {
+  if(!ts) return "";
+  return new Date(ts*1000).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
 }
 
-function BadgeCard({ badge, earned, earnedAt }: {
-  badge: typeof BADGE_META[0];
-  earned: boolean;
-  earnedAt: number;
-}) {
-  const t = TIER_STYLE[badge.tier];
+function Badge({ b, earned, at }: { b:typeof BADGES[0]; earned:boolean; at:number }) {
+  const t = TIERS[b.tier as keyof typeof TIERS];
   return (
-    <div style={{
-      position: "relative",
-      borderRadius: "14px",
-      padding: "16px",
-      border: `1px solid ${earned ? t.border : "rgba(255,255,255,0.04)"}`,
-      background: earned ? t.bg : "rgba(255,255,255,0.01)",
-      boxShadow: earned ? t.glow : "none",
-      opacity: earned ? 1 : 0.38,
-      filter: earned ? "none" : "grayscale(1)",
-      transition: "all 0.2s",
-      cursor: "default",
-    }}
-    onMouseEnter={e => {
-      if (earned) (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
-    }}
-    onMouseLeave={e => {
-      (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-    }}
+    <div
+      style={{
+        position:"relative",
+        borderRadius:"var(--r3)",
+        padding:"20px 16px",
+        border:`1px solid ${earned ? t.edge : "var(--b0)"}`,
+        background: earned
+          ? `linear-gradient(160deg,${t.dim} 0%,var(--g1) 70%)`
+          : "var(--g0)",
+        boxShadow: earned ? t.glow : "none",
+        opacity: earned ? 1 : 0.28,
+        filter: earned ? "none" : "grayscale(1)",
+        transition:"transform 0.2s ease, box-shadow 0.2s ease",
+        cursor:"default",
+        display:"flex", flexDirection:"column",
+        alignItems:"center", textAlign:"center", gap:"9px",
+        overflow:"hidden",
+      }}
+      onMouseEnter={e=>{
+        if(earned){
+          (e.currentTarget as HTMLDivElement).style.transform="translateY(-3px)";
+          (e.currentTarget as HTMLDivElement).style.boxShadow=t.glow!=="none"
+            ? t.glow : "0 8px 32px rgba(0,0,0,0.3)";
+        }
+      }}
+      onMouseLeave={e=>{
+        (e.currentTarget as HTMLDivElement).style.transform="translateY(0)";
+        (e.currentTarget as HTMLDivElement).style.boxShadow=earned ? t.glow : "none";
+      }}
     >
       {/* Tier label */}
+      <span className={`tier tier-${b.tier}`} style={{position:"absolute",top:"10px",right:"10px"}}>
+        {earned ? b.tier : "🔒"}
+      </span>
+
+      {/* Earned indicator dot */}
       {earned && (
-        <span style={{
-          position: "absolute",
-          top: "10px",
-          right: "10px",
-          fontFamily: "monospace",
-          fontSize: "9px",
-          fontWeight: 700,
-          color: t.label,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          opacity: 0.8,
-        }}>
-          {badge.tier}
-        </span>
+        <div style={{
+          position:"absolute",top:"11px",left:"13px",
+          width:"5px",height:"5px",borderRadius:"50%",
+          background:t.dot, boxShadow:`0 0 8px ${t.dot}`,
+        }}/>
       )}
 
-      {/* Lock icon if not earned */}
-      {!earned && (
-        <span style={{
-          position: "absolute",
-          top: "10px",
-          right: "10px",
-          fontSize: "11px",
-          opacity: 0.4,
-        }}>
-          🔒
-        </span>
-      )}
-
-      {/* Icon */}
+      {/* Icon in circle */}
       <div style={{
-        fontSize: "28px",
-        marginBottom: "10px",
-        lineHeight: 1,
-      }}>
-        {badge.icon}
-      </div>
+        width:"56px",height:"56px",borderRadius:"50%",
+        background: earned ? t.dim : "var(--g1)",
+        border:`1.5px solid ${earned ? t.edge : "var(--b0)"}`,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        fontSize:"26px",flexShrink:0,marginTop:"10px",
+        boxShadow: earned ? `0 0 16px ${t.dot}40` : "none",
+      }}>{b.icon}</div>
 
       {/* Name */}
-      <div style={{
-        fontFamily: "monospace",
-        fontWeight: 700,
-        fontSize: "13px",
-        color: earned ? "var(--text)" : "var(--text-3)",
-        marginBottom: "5px",
-      }}>
-        {badge.name}
-      </div>
+      <p style={{
+        fontFamily:"'Plus Jakarta Sans',sans-serif",
+        fontSize:"12px",fontWeight:700,
+        color: earned ? "var(--t0)" : "var(--t3)",
+        letterSpacing:"0.01em",
+      }}>{b.name}</p>
 
-      {/* Description */}
-      <div style={{
-        fontFamily: "monospace",
-        fontSize: "10px",
-        color: "var(--text-3)",
-        lineHeight: 1.5,
-        marginBottom: earned && earnedAt ? "10px" : 0,
-      }}>
-        {badge.desc}
-      </div>
+      {/* Desc */}
+      <p style={{
+        fontFamily:"'JetBrains Mono',monospace",
+        fontSize:"9.5px",color:"var(--t2)",
+        lineHeight:1.55, flex:1,
+      }}>{b.desc}</p>
 
-      {/* Earned date */}
-      {earned && earnedAt > 0 && (
-        <div style={{
-          fontFamily: "monospace",
-          fontSize: "10px",
-          color: t.label,
-          opacity: 0.8,
-        }}>
-          ✓ {formatDate(earnedAt)}
-        </div>
+      {/* Date */}
+      {earned && at>0 && (
+        <p style={{
+          fontFamily:"'JetBrains Mono',monospace",
+          fontSize:"9px",color:t.color,
+          letterSpacing:"0.04em",
+          padding:"3px 8px",borderRadius:"4px",
+          background:t.dim,border:`1px solid ${t.edge}`,
+        }}>✓ {fmtDate(at)}</p>
       )}
     </div>
   );
 }
 
-interface Props { address: string; }
+export default function Badges({ address }: { address:string }) {
+  const { data:ids }  = useReadContract({ address:CONTRACTS.REPUTATION_LEDGER as `0x${string}`, abi:REPUTATION_LEDGER_ABI, functionName:"getBadges",    args:[address as `0x${string}`], query:{refetchInterval:8_000} });
+  const { data:all  } = useReadContract({ address:CONTRACTS.REPUTATION_LEDGER as `0x${string}`, abi:REPUTATION_LEDGER_ABI, functionName:"getAllBadges", args:[address as `0x${string}`], query:{refetchInterval:8_000} });
 
-export default function Badges({ address }: Props) {
-  const { data: badgeIds } = useReadContract({
-    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
-    abi: REPUTATION_LEDGER_ABI,
-    functionName: "getBadges",
-    args: [address as `0x${string}`],
-    query: { refetchInterval: 8_000 },
-  });
+  const earned = new Set((ids as number[]|undefined)?.map(Number)??[]);
+  const atMap: Record<number,number> = {};
+  if(all) (all as any[]).forEach(b=>{ atMap[Number(b.id)]=Number(b.earnedAt); });
 
-  const { data: allBadges } = useReadContract({
-    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
-    abi: REPUTATION_LEDGER_ABI,
-    functionName: "getAllBadges",
-    args: [address as `0x${string}`],
-    query: { refetchInterval: 8_000 },
-  });
-
-  const earnedSet = new Set((badgeIds as number[] | undefined)?.map(Number) ?? []);
-  const earnedAtMap: Record<number, number> = {};
-  if (allBadges) {
-    (allBadges as any[]).forEach((b) => {
-      earnedAtMap[Number(b.id)] = Number(b.earnedAt);
-    });
-  }
-
-  const earnedCount = earnedSet.size;
+  const n   = earned.size;
+  const pct = Math.round((n/BADGES.length)*100);
 
   return (
     <div>
       {/* Header */}
       <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: "20px",
-        flexWrap: "wrap",
-        gap: "10px",
+        display:"flex",alignItems:"flex-end",justifyContent:"space-between",
+        marginBottom:"28px",gap:"20px",flexWrap:"wrap",
       }}>
         <div>
-          <h2 style={{
-            fontFamily: "monospace",
-            fontWeight: 700,
-            fontSize: "16px",
-            color: "var(--text)",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}>
-            <span style={{ color: "#C9A84C" }}>◆</span> Achievement Badges
+          <p className="label" style={{marginBottom:"8px",color:"var(--go)"}}>Achievement Badges</p>
+          <h2 className="title">
+            {n}
+            <span style={{color:"var(--t2)",fontWeight:400,fontSize:"17px"}}> / {BADGES.length} Unlocked</span>
           </h2>
-          <p style={{
-            fontFamily: "monospace",
-            fontSize: "11px",
-            color: "var(--text-3)",
-            marginTop: "4px",
-            letterSpacing: "0.06em",
-          }}>
-            {earnedCount} / {BADGE_META.length} earned
-          </p>
         </div>
 
-        {/* Progress bar */}
-        <div style={{ minWidth: "160px" }}>
-          <div style={{
-            height: "4px",
-            borderRadius: "100px",
-            background: "rgba(255,255,255,0.06)",
-            overflow: "hidden",
-          }}>
-            <div style={{
-              height: "100%",
-              borderRadius: "100px",
-              width: `${(earnedCount / BADGE_META.length) * 100}%`,
-              background: "linear-gradient(90deg, var(--cyan), #C9A84C)",
-              transition: "width 0.6s cubic-bezier(0.4,0,0.2,1)",
-            }} />
+        <div style={{minWidth:"180px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+            <p className="label">Progress</p>
+            <p style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"12px",fontWeight:600,color:"var(--go)"}}>{pct}%</p>
           </div>
-          <div style={{
-            fontFamily: "monospace",
-            fontSize: "10px",
-            color: "var(--text-3)",
-            marginTop: "5px",
-            textAlign: "right",
-          }}>
-            {Math.round((earnedCount / BADGE_META.length) * 100)}% complete
+          <div className="track" style={{height:"5px"}}>
+            <div className="fill-multi" style={{width:`${pct}%`}}/>
           </div>
         </div>
       </div>
 
-      {/* Badge Grid */}
+      {/* Tier legend */}
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-        gap: "12px",
+        display:"flex",gap:"20px",flexWrap:"wrap",
+        marginBottom:"22px",paddingBottom:"18px",
+        borderBottom:"1px solid var(--b0)",
+        alignItems:"center",
       }}>
-        {BADGE_META.map((badge) => (
-          <BadgeCard
-            key={badge.id}
-            badge={badge}
-            earned={earnedSet.has(badge.id)}
-            earnedAt={earnedAtMap[badge.id] ?? 0}
-          />
+        {Object.entries(TIERS).map(([t,s])=>(
+          <div key={t} style={{display:"flex",alignItems:"center",gap:"7px"}}>
+            <div style={{
+              width:"10px",height:"10px",borderRadius:"3px",
+              background:s.dim,border:`1px solid ${s.edge}`,
+            }}/>
+            <span className="label" style={{color:s.color}}>{t}</span>
+          </div>
         ))}
       </div>
 
-      {/* Legend */}
+      {/* Grid */}
       <div style={{
-        marginTop: "20px",
-        display: "flex",
-        gap: "16px",
-        flexWrap: "wrap",
+        display:"grid",
+        gridTemplateColumns:"repeat(auto-fill,minmax(152px,1fr))",
+        gap:"10px",
       }}>
-        {Object.entries(TIER_STYLE).map(([tier, s]) => (
-          <div key={tier} style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "5px",
-            fontFamily: "monospace",
-            fontSize: "10px",
-            color: s.label,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-          }}>
-            <div style={{
-              width: "8px", height: "8px",
-              borderRadius: "2px",
-              background: s.bg,
-              border: `1px solid ${s.border}`,
-            }} />
-            {tier}
-          </div>
+        {BADGES.map(b=>(
+          <Badge key={b.id} b={b} earned={earned.has(b.id)} at={atMap[b.id]??0}/>
         ))}
       </div>
     </div>

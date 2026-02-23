@@ -8,12 +8,24 @@ module.exports = {
     settings: {
       optimizer: { enabled: true, runs: 200 },
       viaIR: true,
+      evmVersion: "shanghai", // ← WAJIB untuk Avalanche Subnet-EVM
     },
   },
   networks: {
     localhost: {
       url: "http://127.0.0.1:8545",
     },
+
+    // ─── APEX NETWORK (L1 Sovereign) ─────────────────────────────────────────
+    apex_local: {
+  url: "http://127.0.0.1:9654/ext/bc/iPWmyj3eTRsSFUmivVcqc7y4xeeeWvLdw78YNLLGv1JGxUPYG/rpc",
+  chainId: 6969,
+  accounts: process.env.APEX_ADMIN_PRIVATE_KEY ? [process.env.APEX_ADMIN_PRIVATE_KEY] : [],
+  gasPrice: 25000000000,
+  gas: 8000000,
+},
+    // ─────────────────────────────────────────────────────────────────────────
+
     polygon_mumbai: {
       url: process.env.POLYGON_MUMBAI_RPC || "https://rpc-mumbai.maticvigil.com",
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
