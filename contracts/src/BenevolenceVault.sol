@@ -178,9 +178,11 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         NATIVE_MINTER.mintNativeCoin(volunteerAddress, tokenRewardWei);
 
         // ── Update Reputation Ledger ──────────────────────────────────────────
+        // v2.2.0: pass eventHash so each ScoreEntry has a real event fingerprint
         uint256 newRepScore = reputationLedger.updateReputation(
             volunteerAddress,
-            impactScoreScaled
+            impactScoreScaled,
+            eventHash
         );
 
         // ── Update Stats ──────────────────────────────────────────────────────

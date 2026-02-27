@@ -5,7 +5,7 @@ async function main() {
   const minterAddress = "0x0200000000000000000000000000000000000001";
   
   // Alamat Vault lu yang baru
-  const vaultAddress = "0x5f7724d967E686400113A8a9175D4d792485683A";
+  const vaultAddress = "0xDC015EB08Ba46F9e4613050564f016DC863Dae2F";
 
   // ABI khusus buat ngasih akses Enabled
   const MinterABI = ["function setEnabled(address addr) external"];

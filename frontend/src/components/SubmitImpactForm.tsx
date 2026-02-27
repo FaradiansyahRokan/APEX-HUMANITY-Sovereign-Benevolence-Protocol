@@ -200,6 +200,63 @@ export default function SubmitImpactForm() {
     return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
   };
 
+  // ── Helper: client-side image resize + compress to base64 ─────────────────
+  // v1.2.0: Resize to max 1024×1024, JPEG quality 0.82, max ~500 KB.
+  // Sends ~80% less data to Oracle while preserving enough detail for YOLOv8.
+  const resizeImageToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const MAX_DIM = 1024;
+      const MAX_KB = 500;
+
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+
+        // Compute scaled dimensions
+        let { naturalWidth: w, naturalHeight: h } = img;
+        if (w > MAX_DIM || h > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Canvas not supported"));
+        ctx.drawImage(img, 0, 0, w, h);
+
+        // Compress until within size limit
+        let quality = 0.82;
+        const tryCompress = () => {
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          const base64 = dataUrl.split(",")[1];
+          const sizeKB = (base64.length * 0.75) / 1024;  // approx decoded bytes
+          if (sizeKB <= MAX_KB || quality < 0.4) {
+            resolve(base64);
+          } else {
+            quality -= 0.1;
+            tryCompress();
+          }
+        };
+        tryCompress();
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        // Fallback: read raw without resize
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      };
+
+      img.src = url;
+    });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -219,12 +276,8 @@ export default function SubmitImpactForm() {
       setStep("oracle");
       let image_base64: string | null = null;
       if (file) {
-        image_base64 = await new Promise<string>((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => res((r.result as string).split(",")[1]);
-          r.onerror = () => rej(new Error("Failed to read file"));
-          r.readAsDataURL(file);
-        });
+        // v1.2.0: resize + compress client-side before sending to Oracle
+        image_base64 = await resizeImageToBase64(file);
       }
 
       const resp = await fetch(`${process.env.NEXT_PUBLIC_ORACLE_URL}/api/v1/verify`, {

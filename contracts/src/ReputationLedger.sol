@@ -37,6 +37,7 @@ contract ReputationLedger is AccessControl {
 
     address[] public leaderboard;
     mapping(address => bool) private _inLeaderboard;
+    mapping(address => bool) private _banned;           // v1.2.0 — banned addresses
 
     uint256 public totalParticipants;
     uint256 public totalImpactScoreGenerated;
@@ -87,6 +88,11 @@ contract ReputationLedger is AccessControl {
     /// @notice Emitted when a keeper pushes updated global ranks on-chain.
     event RanksUpdated(uint256 count, uint256 timestamp);
 
+    /// @notice Emitted when an admin bans an address.
+    event AddressBanned(address indexed volunteer, uint256 timestamp);
+    /// @notice Emitted when an admin unbans an address.
+    event AddressUnbanned(address indexed volunteer, uint256 timestamp);
+
     // ── Constructor ───────────────────────────────────────────────────────────
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -95,21 +101,28 @@ contract ReputationLedger is AccessControl {
 
     // ── Core Update (only callable by BenevolenceVault) ───────────────────────
 
-    function updateReputation(address volunteer, uint256 scoreDelta)
+    function updateReputation(
+        address volunteer,
+        uint256 scoreDelta,
+        bytes32 eventHash
+    )
         external
         onlyRole(VAULT_ROLE)
         returns (uint256 newCumulative)
     {
+        require(!_banned[volunteer], "ReputationLedger: volunteer is banned");
+
         ReputationRecord storage record = _records[volunteer];
 
         record.cumulativeScore  += scoreDelta;
         record.eventCount       += 1;
         record.lastUpdatedAt     = block.timestamp;
 
+        // v1.2.0 FIX: store real event fingerprint hash instead of bytes32(0)
         _scoreHistory[volunteer].push(ScoreEntry({
             score:     scoreDelta,
             timestamp: block.timestamp,
-            eventHash: bytes32(0)
+            eventHash: eventHash
         }));
 
         if (!_inLeaderboard[volunteer]) {
@@ -152,6 +165,36 @@ contract ReputationLedger is AccessControl {
             _records[volunteers[i]].rank = ranks[i];
         }
         emit RanksUpdated(volunteers.length, block.timestamp);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  MODERATION — Ban / Unban
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Ban a volunteer address — blocks further reputation updates
+     *         and hides them from leaderboard pagination queries.
+     * @dev    Only callable by DEFAULT_ADMIN_ROLE.
+     */
+    function banAddress(address volunteer) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(volunteer != address(0), "Invalid address");
+        require(!_banned[volunteer], "Already banned");
+        _banned[volunteer] = true;
+        emit AddressBanned(volunteer, block.timestamp);
+    }
+
+    /**
+     * @notice Unban a volunteer address.
+     */
+    function unbanAddress(address volunteer) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_banned[volunteer], "Not banned");
+        _banned[volunteer] = false;
+        emit AddressUnbanned(volunteer, block.timestamp);
+    }
+
+    /// @notice Returns true if the address has been banned by an admin.
+    function isBanned(address volunteer) external view returns (bool) {
+        return _banned[volunteer];
     }
 
     // ── Badge Internal Logic ──────────────────────────────────────────────────
@@ -270,17 +313,35 @@ contract ReputationLedger is AccessControl {
         external view
         returns (address[] memory addresses, uint256[] memory scores, uint256[] memory ranks)
     {
-        uint256 end = offset + limit;
-        if (end > leaderboard.length) end = leaderboard.length;
-        uint256 len = end - offset;
-        addresses = new address[](len);
-        scores    = new uint256[](len);
-        ranks     = new uint256[](len);
-        for (uint256 i = 0; i < len; i++) {
-            address v    = leaderboard[offset + i];
-            addresses[i] = v;
-            scores[i]    = _records[v].cumulativeScore;
-            ranks[i]     = _records[v].rank;
+        // v1.2.0: skip banned addresses — build a filtered window
+        uint256 total   = leaderboard.length;
+        uint256 counted = 0;    // non-banned items seen so far
+        uint256 added   = 0;    // items added to output
+
+        // Allocate worst-case size; trim at the end.
+        address[] memory tmpAddr  = new address[](limit);
+        uint256[] memory tmpScore = new uint256[](limit);
+        uint256[] memory tmpRank  = new uint256[](limit);
+
+        for (uint256 i = 0; i < total && added < limit; i++) {
+            address v = leaderboard[i];
+            if (_banned[v]) continue;          // skip banned
+            if (counted < offset) { counted++; continue; } // skip before offset
+            tmpAddr[added]  = v;
+            tmpScore[added] = _records[v].cumulativeScore;
+            tmpRank[added]  = _records[v].rank;
+            added++;
+            counted++;
+        }
+
+        // Trim to actual size
+        addresses = new address[](added);
+        scores    = new uint256[](added);
+        ranks     = new uint256[](added);
+        for (uint256 j = 0; j < added; j++) {
+            addresses[j] = tmpAddr[j];
+            scores[j]    = tmpScore[j];
+            ranks[j]     = tmpRank[j];
         }
     }
 

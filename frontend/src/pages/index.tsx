@@ -14,6 +14,7 @@ import ImpactFeed from "@/components/Impactfeed";
 import Badges from "@/components/Badges";
 import P2PTransfer from "@/components/P2ptransfer";
 import CommunityStream from "@/components/CommunityStream";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 type TabId = "submit" | "profile" | "feed" | "badges" | "leaderboard" | "transfer" | "stream";
 
@@ -313,15 +314,17 @@ export default function Home() {
             })}
           </div>
 
-          {/* Content */}
+          {/* Content — wrapped in ErrorBoundary for graceful Oracle/wallet failures */}
           <div className="rise" style={{ paddingTop: "40px" }}>
-            {tab === "submit" && <SubmitImpactForm />}
-            {tab === "profile" && <div style={{ maxWidth: "520px" }}><ReputationCard address={address!} reputationScore={score} /></div>}
-            {tab === "stream" && <CommunityStream address={address!} reputationScore={score} />}
-            {tab === "feed" && <ImpactFeed />}
-            {tab === "badges" && <Badges address={address!} />}
-            {tab === "leaderboard" && <Leaderboard />}
-            {tab === "transfer" && <P2PTransfer address={address!} />}
+            <ErrorBoundary context={tab}>
+              {tab === "submit" && <SubmitImpactForm />}
+              {tab === "profile" && <div style={{ maxWidth: "520px" }}><ReputationCard address={address!} reputationScore={score} /></div>}
+              {tab === "stream" && <CommunityStream address={address!} reputationScore={score} />}
+              {tab === "feed" && <ImpactFeed />}
+              {tab === "badges" && <Badges address={address!} />}
+              {tab === "leaderboard" && <Leaderboard />}
+              {tab === "transfer" && <P2PTransfer address={address!} />}
+            </ErrorBoundary>
           </div>
         </div>
       ) : (

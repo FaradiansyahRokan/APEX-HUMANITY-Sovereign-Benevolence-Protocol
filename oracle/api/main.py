@@ -90,6 +90,39 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+# ─── Startup Validation ───────────────────────────────────────────────────────
+@app.on_event("startup")
+async def _startup_validation():
+    """v1.2.0 — Check critical env vars at boot, not silently at runtime."""
+    import os as _os  # local re-import for clarity
+
+    private_key = _os.getenv("ORACLE_PRIVATE_KEY", "")
+    api_key_val = _os.getenv("ORACLE_API_KEY", "")
+    DEFAULT_KEY = "apex-dev-key-change-in-prod"
+
+    warnings_found = []
+
+    if not private_key:
+        warnings_found.append(
+            "NO ORACLE_PRIVATE_KEY SET — A RANDOM EPHEMERAL KEY IS BEING USED! "
+            "The oracle address will change on every restart. "
+            "Set ORACLE_PRIVATE_KEY in oracle/.env before going to production."
+        )
+
+    if not api_key_val or api_key_val == DEFAULT_KEY:
+        warnings_found.append(
+            f"DEFAULT API KEY IN USE ('{DEFAULT_KEY}'). "
+            "Anyone who knows this default can submit arbitrary payloads. "
+            "Set a strong ORACLE_API_KEY in oracle/.env before going to production."
+        )
+
+    for w in warnings_found:
+        log.critical(f"\n{'='*70}\n⚠️  SECURITY WARNING: {w}\n{'='*70}")
+
+    if not warnings_found:
+        log.info("✅ Startup validation passed. Oracle key and API key are configured.")
+
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 # FIX: Read allowed origins from env var — defaults to localhost only.
 # In production, set: ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
@@ -553,9 +586,58 @@ async def cast_vote(
     if vd["outcome"]:
         raise HTTPException(status_code=409, detail=f"Voting already concluded: {vd['outcome']}.")
 
-    # Phase eligibility
+    # ── v1.2.0 FIX: Verify reputation on-chain, don't trust frontend ─────────
+    reputation_score = body.reputation_score   # fallback
+    _rpc_url     = os.getenv("APEX_RPC_URL", "")
+    _ledger_addr = os.getenv("REPUTATION_LEDGER_ADDRESS", "")
+
+    if _rpc_url and _ledger_addr:
+        try:
+            from web3 import Web3 as _Web3
+            _LEDGER_ABI = [
+                {
+                    "inputs": [{"internalType": "address", "name": "volunteer", "type": "address"}],
+                    "name": "getReputation",
+                    "outputs": [
+                        {"internalType": "uint256", "name": "cumulativeScore",  "type": "uint256"},
+                        {"internalType": "uint256", "name": "eventCount",        "type": "uint256"},
+                        {"internalType": "uint256", "name": "lastUpdatedAt",     "type": "uint256"},
+                        {"internalType": "uint256", "name": "rank",              "type": "uint256"},
+                    ],
+                    "stateMutability": "view",
+                    "type": "function",
+                }
+            ]
+            _w3 = _Web3(_Web3.HTTPProvider(_rpc_url, request_kwargs={"timeout": 5}))
+            _contract = _w3.eth.contract(
+                address=_Web3.to_checksum_address(_ledger_addr),
+                abi=_LEDGER_ABI,
+            )
+            cumulative, _, _, _ = _contract.functions.getReputation(
+                _Web3.to_checksum_address(body.voter_address)
+            ).call()
+            # cumulative is scaled ×100 on-chain — convert to display units
+            reputation_score = cumulative / 100.0
+            log.info(
+                f"[VOTE] On-chain reputation for {body.voter_address}: "
+                f"{reputation_score:.2f} (raw={cumulative})"
+            )
+        except Exception as rpc_err:
+            log.warning(
+                f"[VOTE] On-chain reputation check failed ({rpc_err}). "
+                "Falling back to frontend-supplied score. "
+                "Set APEX_RPC_URL + REPUTATION_LEDGER_ADDRESS to enable on-chain check."
+            )
+    else:
+        log.warning(
+            "[VOTE] APEX_RPC_URL or REPUTATION_LEDGER_ADDRESS not set — "
+            "using frontend-supplied reputation score (less secure). "
+            "Set these env vars to enable on-chain verification."
+        )
+
+    # Phase eligibility (against verified reputation)
     age_sec = int(time.time()) - vd["opened_at"]
-    if age_sec < VOTE_PHASE2_DELAY_SEC and body.reputation_score < CHAMPION_REPUTATION_THRESHOLD:
+    if age_sec < VOTE_PHASE2_DELAY_SEC and reputation_score < CHAMPION_REPUTATION_THRESHOLD:
         phase2_in = VOTE_PHASE2_DELAY_SEC - age_sec
         raise HTTPException(
             status_code=403,
