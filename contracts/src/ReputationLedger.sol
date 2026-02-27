@@ -5,9 +5,9 @@ pragma solidity ^0.8.20;
  * ╔══════════════════════════════════════════════════════════════════════════╗
  * ║          APEX HUMANITY — ReputationLedger.sol                           ║
  * ║                                                                          ║
- * ║  Immutable, append-only reputation score registry.                      ║
- * ║  Scores are Soulbound: they cannot be transferred, sold, or deleted.    ║
- * ║  A transparent record of every good deed — forever.                     ║
+ * ║  v1.1.0 — Governance rank update:                                       ║
+ * ║    • updateRanks() allows DAO / keeper to push sorted ranks on-chain    ║
+ * ║    • rank field in ReputationRecord is now populated                    ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -15,14 +15,15 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract ReputationLedger is AccessControl {
 
-    bytes32 public constant VAULT_ROLE = keccak256("VAULT_ROLE");
+    bytes32 public constant VAULT_ROLE   = keccak256("VAULT_ROLE");
+    bytes32 public constant KEEPER_ROLE  = keccak256("KEEPER_ROLE"); // rank updater bot/DAO
 
     // ── Score Storage ─────────────────────────────────────────────────────────
     struct ReputationRecord {
         uint256 cumulativeScore;     // Total lifetime impact score
         uint256 eventCount;          // Number of verified impact events
         uint256 lastUpdatedAt;       // Unix timestamp of last update
-        uint256 rank;                // Global rank (updated periodically by DAO)
+        uint256 rank;                // Global rank — updated by updateRanks()
     }
 
     mapping(address => ReputationRecord) private _records;
@@ -42,32 +43,27 @@ contract ReputationLedger is AccessControl {
 
     // ── Achievement Badge System ──────────────────────────────────────────────
 
-    // Badge IDs — each is a unique uint8
-    uint8 public constant BADGE_FIRST_STEP    = 1;   // First submission
-    uint8 public constant BADGE_HELPER        = 2;   // 5 events
-    uint8 public constant BADGE_DEDICATED     = 3;   // 10 events
-    uint8 public constant BADGE_CHAMPION      = 4;   // 25 events
-    uint8 public constant BADGE_LEGEND        = 5;   // 50 events
-    uint8 public constant BADGE_HIGH_IMPACT   = 6;   // Single event score ≥ 80
-    uint8 public constant BADGE_PERFECT       = 7;   // Single event score = 100
-    uint8 public constant BADGE_CENTURY       = 8;   // Cumulative score ≥ 10,000
-    uint8 public constant BADGE_TITAN         = 9;   // Cumulative score ≥ 50,000
+    uint8 public constant BADGE_FIRST_STEP    = 1;
+    uint8 public constant BADGE_HELPER        = 2;
+    uint8 public constant BADGE_DEDICATED     = 3;
+    uint8 public constant BADGE_CHAMPION      = 4;
+    uint8 public constant BADGE_LEGEND        = 5;
+    uint8 public constant BADGE_HIGH_IMPACT   = 6;
+    uint8 public constant BADGE_PERFECT       = 7;
+    uint8 public constant BADGE_CENTURY       = 8;
+    uint8 public constant BADGE_TITAN         = 9;
 
-    // volunteer => badgeId => earned
-    mapping(address => mapping(uint8 => bool)) private _badges;
-
-    // All badge IDs earned by a volunteer (for easy enumeration)
-    mapping(address => uint8[]) private _badgeList;
+    mapping(address => mapping(uint8 => bool))    private _badges;
+    mapping(address => uint8[])                   private _badgeList;
 
     struct BadgeInfo {
         uint8   id;
         string  name;
         string  description;
         string  icon;
-        uint256 earnedAt;   // 0 = not earned
+        uint256 earnedAt;
     }
 
-    // volunteer => badgeId => timestamp earned
     mapping(address => mapping(uint8 => uint256)) private _badgeEarnedAt;
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -88,9 +84,13 @@ contract ReputationLedger is AccessControl {
         uint256 timestamp
     );
 
+    /// @notice Emitted when a keeper pushes updated global ranks on-chain.
+    event RanksUpdated(uint256 count, uint256 timestamp);
+
     // ── Constructor ───────────────────────────────────────────────────────────
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(KEEPER_ROLE, admin); // admin can also act as keeper initially
     }
 
     // ── Core Update (only callable by BenevolenceVault) ───────────────────────
@@ -130,14 +130,34 @@ contract ReputationLedger is AccessControl {
             block.timestamp
         );
 
-        // ── Auto-award badges ─────────────────────────────────────────────────
         _checkAndAwardBadges(volunteer, scoreDelta, record.eventCount, record.cumulativeScore);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  GOVERNANCE — Rank Update
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Batch-update global ranks for a set of volunteers.
+     *         Called by a DAO keeper bot after sorting leaderboard off-chain.
+     * @dev    Arrays must be the same length.  Rank 1 = highest score.
+     *         Gas cost: O(n) — batch call, not per-event.
+     */
+    function updateRanks(
+        address[] calldata volunteers,
+        uint256[] calldata ranks
+    ) external onlyRole(KEEPER_ROLE) {
+        require(volunteers.length == ranks.length, "Array length mismatch");
+        for (uint256 i = 0; i < volunteers.length; i++) {
+            _records[volunteers[i]].rank = ranks[i];
+        }
+        emit RanksUpdated(volunteers.length, block.timestamp);
     }
 
     // ── Badge Internal Logic ──────────────────────────────────────────────────
 
     function _awardBadge(address volunteer, uint8 badgeId, string memory name) internal {
-        if (_badges[volunteer][badgeId]) return; // already earned
+        if (_badges[volunteer][badgeId]) return;
         _badges[volunteer][badgeId]        = true;
         _badgeEarnedAt[volunteer][badgeId] = block.timestamp;
         _badgeList[volunteer].push(badgeId);
@@ -146,22 +166,19 @@ contract ReputationLedger is AccessControl {
 
     function _checkAndAwardBadges(
         address volunteer,
-        uint256 scoreDelta,        // scaled ×100
+        uint256 scoreDelta,
         uint256 eventCount,
-        uint256 cumulativeScore    // scaled ×100
+        uint256 cumulativeScore
     ) internal {
-        // Event-count milestones
         if (eventCount >= 1)  _awardBadge(volunteer, BADGE_FIRST_STEP, "First Step");
         if (eventCount >= 5)  _awardBadge(volunteer, BADGE_HELPER,     "Helper");
         if (eventCount >= 10) _awardBadge(volunteer, BADGE_DEDICATED,  "Dedicated");
         if (eventCount >= 25) _awardBadge(volunteer, BADGE_CHAMPION,   "Champion");
         if (eventCount >= 50) _awardBadge(volunteer, BADGE_LEGEND,     "Legend");
 
-        // Single-event score milestones (scoreDelta is impact_score × 100)
         if (scoreDelta >= 8000)  _awardBadge(volunteer, BADGE_HIGH_IMPACT, "High Impact");
         if (scoreDelta >= 10000) _awardBadge(volunteer, BADGE_PERFECT,     "Perfect Score");
 
-        // Cumulative score milestones
         if (cumulativeScore >= 1_000_000)  _awardBadge(volunteer, BADGE_CENTURY, "Century");
         if (cumulativeScore >= 5_000_000)  _awardBadge(volunteer, BADGE_TITAN,   "Titan");
     }
@@ -202,7 +219,6 @@ contract ReputationLedger is AccessControl {
         return _badgeEarnedAt[volunteer][badgeId];
     }
 
-    /// @notice Returns full badge info for all 9 badges for a given volunteer.
     function getAllBadges(address volunteer)
         external view
         returns (BadgeInfo[] memory badges)
@@ -237,11 +253,11 @@ contract ReputationLedger is AccessControl {
 
         for (uint256 i = 0; i < 9; i++) {
             badges[i] = BadgeInfo({
-                id:       ids[i],
-                name:     names[i],
+                id:          ids[i],
+                name:        names[i],
                 description: descs[i],
-                icon:     icons[i],
-                earnedAt: _badgeEarnedAt[volunteer][ids[i]]
+                icon:        icons[i],
+                earnedAt:    _badgeEarnedAt[volunteer][ids[i]]
             });
         }
     }
@@ -252,16 +268,19 @@ contract ReputationLedger is AccessControl {
 
     function getLeaderboardPage(uint256 offset, uint256 limit)
         external view
-        returns (address[] memory addresses, uint256[] memory scores)
+        returns (address[] memory addresses, uint256[] memory scores, uint256[] memory ranks)
     {
         uint256 end = offset + limit;
         if (end > leaderboard.length) end = leaderboard.length;
         uint256 len = end - offset;
         addresses = new address[](len);
         scores    = new uint256[](len);
+        ranks     = new uint256[](len);
         for (uint256 i = 0; i < len; i++) {
-            addresses[i] = leaderboard[offset + i];
-            scores[i]    = _records[leaderboard[offset + i]].cumulativeScore;
+            address v    = leaderboard[offset + i];
+            addresses[i] = v;
+            scores[i]    = _records[v].cumulativeScore;
+            ranks[i]     = _records[v].rank;
         }
     }
 

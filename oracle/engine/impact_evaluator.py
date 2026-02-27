@@ -5,11 +5,13 @@ Sovereign Autonomous Trust & Impact Network (SATIN)
 Core Impact Evaluator for Proof of Beneficial Action (PoBA)
 
 Author: APEX HUMANITY Protocol
-Version: 1.0.1  — Bugfix release
+Version: 1.1.0  — Security patch release
 Fixes:
-  - CV verifier no longer called before image_bytes None-check (double-call + BytesIO(None) error)
-  - ai_confidence included in OraclePayload serialization / to_contract_args
-  - GPS high-need zone logging clarified
+  - _build_signing_hash now uses eth_abi.encode (abi.encode semantics) to match
+    BenevolenceVault.sol v2.1.0 patch — prevents hash-collision exploit
+  - effort_hours double-assignment bug fixed in EvidenceBundle.to_impact_metadata
+  - GPSCoordinates renamed to GPSCoordinatesInput (prevents confusion with internal GPSCoordinate)
+  - Previous v1.0.1 fixes retained
 """
 
 from __future__ import annotations
@@ -702,38 +704,100 @@ class ImpactEvaluator:
         """
         Replicates BenevolenceVault._buildSigningHash() exactly.
 
-        Solidity:
-            keccak256(abi.encodePacked(
-                eventId, volunteerAddress, beneficiaryAddress,
-                impactScoreScaled, tokenRewardWei, zkProofHash,
-                eventHash, nonce, expiresAt
-            ))
+        FIX v1.1.0 — Contract now uses abi.encode (not abi.encodePacked).
+        We use eth_abi.encode here to produce identical byte layout:
+
+            Solidity v2.1.0:
+                keccak256(abi.encode(
+                    eventId, volunteerAddress, beneficiaryAddress,
+                    impactScoreScaled, tokenRewardWei, zkProofHash,
+                    eventHash, nonce, expiresAt
+                ))
+
+        abi.encode pads every type to 32-byte slots and encodes dynamic
+        types (string) with a pointer + length prefix — eliminating the
+        hash-collision vulnerability that abi.encodePacked had.
         """
-        packed = (
-            event_id_bytes32                                          # bytes32 (32 bytes)
-            + bytes.fromhex(volunteer_address.lower()[2:])            # address (20 bytes)
-            + bytes.fromhex(beneficiary_address.lower()[2:])          # address (20 bytes)
-            + impact_score_scaled.to_bytes(32, "big")                 # uint256 (32 bytes)
-            + token_reward_wei.to_bytes(32, "big")                    # uint256 (32 bytes)
-            + zk_proof_hash_bytes32                                   # bytes32 (32 bytes)
-            + event_hash_bytes32                                      # bytes32 (32 bytes)
-            + nonce.encode("utf-8")                                   # string  (raw bytes)
-            + expires_at.to_bytes(32, "big")                          # uint256 (32 bytes)
+        from eth_abi import encode as abi_encode  # pip install eth-abi (ships with web3)
+
+        # Normalise addresses: eth_abi expects checksummed or lowercase hex
+        vol_addr = Web3.to_checksum_address(volunteer_address)
+        ben_addr = Web3.to_checksum_address(beneficiary_address)
+
+        encoded = abi_encode(
+            [
+                "bytes32",  # eventId
+                "address",  # volunteerAddress
+                "address",  # beneficiaryAddress
+                "uint256",  # impactScoreScaled
+                "uint256",  # tokenRewardWei
+                "bytes32",  # zkProofHash
+                "bytes32",  # eventHash
+                "string",   # nonce            ← dynamic type, safe with abi.encode
+                "uint256",  # expiresAt
+            ],
+            [
+                event_id_bytes32,
+                vol_addr,
+                ben_addr,
+                impact_score_scaled,
+                token_reward_wei,
+                zk_proof_hash_bytes32,
+                event_hash_bytes32,
+                nonce,
+                expires_at,
+            ]
         )
-        return _keccak256(packed)
+        return _keccak256(encoded)
 
     # ------------------------------------------------------------------
     def _verify_zkp(self, zkp_bundle: ZKProofBundle) -> bool:
         """
-        Simulates Groth16 ZKP verification.
-        In production: use snarkjs Python bindings or subprocess call.
+        ZKP Verification — Production Roadmap
+        =====================================
+        Current (MVP): Simulated Groth16 proof structure.
+          - zk_proof_hash is a keccak256 commit of (beneficiary_address + event_id)
+          - Deterministic simulation accepts ~85% of proofs (hash_int % 7 != 0)
+
+        Phase 1 — Commitment Scheme (next sprint):
+          - Replace with Pedersen commitment: C = g^m * h^r where m = impact_score
+          - Verifier confirms C matches recomputed commitment without revealing m
+          - No external library needed — pure Python
+
+        Phase 2 — Real ZK-SNARK (before mainnet):
+          - Use snarkjs + Circom to compile a PoBA circuit:
+              pragma circom 2.0.0;
+              template ImpactProof() {
+                  signal input impactScore;   // private
+                  signal input minScore;      // public
+                  signal output valid;        // public
+                  valid <== impactScore >= minScore;  // range proof
+              }
+          - Oracle generates proof: snarkjs.groth16.fullProve(input, wasm, zkey)
+          - On-chain verifier contract: ImpactVerifier.sol (auto-generated by snarkjs)
+          - Frontend calls ImpactVerifier.verifyProof() before releaseReward()
+
+        Phase 3 — Identity ZKP (Sybil resistance):
+          - Semaphore or Noir circuits to prove identity membership without
+            revealing wallet address (full SovereignID privacy)
+          - Integrates with Worldcoin World ID for PoH (Proof of Humanity)
+
+        Phase 4 — Recursive SNARKs:
+          - Aggregate multiple event proofs into a single on-chain proof
+          - Dramatically reduces gas cost for batch verifications
+
+        References:
+          - snarkjs: https://github.com/iden3/snarkjs
+          - Circom: https://docs.circom.io
+          - Semaphore: https://semaphore.appliedzkp.org
+          - Noir (Aztec ZK): https://noir-lang.org
         """
         if not zkp_bundle.proof_hash or len(zkp_bundle.proof_hash) < 32:
             return False
         if not zkp_bundle.public_signals:
             return False
         hash_int = int(zkp_bundle.proof_hash[:8], 16)
-        return hash_int % 7 != 0   # simulate ~85 % success for dev
+        return hash_int % 7 != 0   # simulate ~85 % success for dev/MVP
 
     # ------------------------------------------------------------------
     def _reject(self, metadata: ImpactMetadata, reason: str) -> ImpactMetadata:
@@ -827,8 +891,13 @@ def create_impact_submission(
 # ===========================================================================
 
 @dataclass
-class GPSCoordinates:
-    """GPS input as expected by main.py VerifyImpactRequest."""
+class GPSCoordinatesInput:
+    """
+    GPS input as expected by main.py VerifyImpactRequest.
+    FIX v1.1.0: Renamed from GPSCoordinates → GPSCoordinatesInput to avoid
+    confusion with the internal GPSCoordinate dataclass used inside the
+    evaluation pipeline.
+    """
     latitude:        float
     longitude:       float
     altitude:        float = 0.0
@@ -857,7 +926,7 @@ class EvidenceBundle:
     ipfs_cid:            str
     evidence_type:       str
     hash_sha256:         str
-    gps:                 GPSCoordinates
+    gps:                 GPSCoordinatesInput
     action_type:         ActionType
     people_helped:       int
     volunteer_address:   str
@@ -871,14 +940,15 @@ class EvidenceBundle:
         """
         Convert to ImpactMetadata for the internal evaluation pipeline.
 
-        Scoring calibration targets ≥30 impact score (≥3000 scaled):
-          - effort_hours  = max(8.0, people_helped × 0.5)
-          - poverty_index = max(0.70, ...)
-        effort_hours  = max(1.0, self.effort_hours)
+        FIX v1.1.0: merged the two conflicting effort_hours assignments into one.
+          - Respect user-submitted effort_hours (≥1h floor)
+          - Also ensure effort ≥ people_helped × 0.5h (proxy for actual work)
+          - poverty_index boosted by reach (more people → higher need zone proxy)
         """
-        effort_hours  = max(8.0, self.people_helped * 0.5)
+        # FIX: single assignment — take the max of user-submitted hours and
+        # the people-based lower bound, so neither logic is silently discarded.
+        effort_hours  = max(max(1.0, self.effort_hours), self.people_helped * 0.5)
         poverty_index = max(0.70, min(1.0, 0.50 + (self.people_helped / 200.0) * 0.30))
-        effort_hours = max(1.0, self.effort_hours)
         urgency = UrgencyLevel(self.urgency_level.upper())
 
         return ImpactMetadata(
@@ -1006,7 +1076,7 @@ def _evaluate_evidence_bundle(
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     print("=" * 70)
-    print("  SATIN ENGINE — APEX HUMANITY Oracle  (Demo Run v1.0.1)")
+    print("  SATIN ENGINE — APEX HUMANITY Oracle  (Demo Run v1.1.0)")
     print("=" * 70)
 
     # Create a synthetic 200×200 test image

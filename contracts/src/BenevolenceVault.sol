@@ -4,11 +4,12 @@ pragma solidity ^0.8.20;
 /**
  * ╔══════════════════════════════════════════════════════════════════════════╗
  * ║          APEX HUMANITY — BenevolenceVault.sol                           ║
- * ║          Sovereign Benevolence Protocol  v2.0.0                         ║
+ * ║          Sovereign Benevolence Protocol  v2.1.0                         ║
  * ║                                                                          ║
- * ║  v2.0.0 — Native Token Minting                                          ║
- * ║  Reward volunteer langsung dengan GOOD native coin (bukan ERC-20).      ║
- * ║  Menggunakan Avalanche NativeMinter Precompile.                         ║
+ * ║  v2.0.0 — Native Token Minting via Avalanche NativeMinter Precompile   ║
+ * ║  v2.1.0 — Security patches:                                             ║
+ * ║    • abi.encode replaces abi.encodePacked (hash-collision fix)          ║
+ * ║    • SovereignID opt-in guard added                                     ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -21,9 +22,21 @@ import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./ReputationLedger.sol";
 
 // ── Avalanche NativeMinter Precompile Interface ────────────────────────────────
-// Address ini fixed di semua Avalanche Subnet-EVM — tidak perlu diubah
 interface INativeMinter {
     function mintNativeCoin(address addr, uint256 amount) external;
+}
+
+// ── Minimal SovereignID Interface ─────────────────────────────────────────────
+interface ISovereignID {
+    function hasIdentity(address owner) external view returns (bool);
+    function getIdentity(address owner) external view returns (
+        uint256 tokenId,
+        string memory didDocument,
+        string memory countryIso,
+        uint256 issuedAt,
+        bool isActive,
+        bool isVerifiedHuman
+    );
 }
 
 contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
@@ -45,9 +58,13 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
     uint256 public totalEventsVerified;
     uint256 public minImpactScoreToRelease = 3000; // 30.00 scaled ×100
 
+    // ── SovereignID Integration (opt-in) ──────────────────────────────────────
+    ISovereignID public sovereignIDContract;
+    bool public requireSovereignID = false; // DAO can enable when SovereignID is live
+
     // ── Anti-Replay Protection ────────────────────────────────────────────────
     mapping(bytes32 => bool) private _usedEventIds;
-    mapping(string  => bool) private _usedNonces;
+    mapping(bytes32 => bool) private _usedNonces; // FIX: bytes32 keccak of nonce (not raw string)
 
     // ── Events ────────────────────────────────────────────────────────────────
     event RewardReleased(
@@ -55,7 +72,7 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         address indexed volunteer,
         address indexed beneficiary,
         uint256 impactScore,
-        uint256 tokenReward,     // GOOD native coin amount in wei
+        uint256 tokenReward,
         bytes32 zkProofHash,
         bytes32 eventHash,
         uint256 timestamp
@@ -69,16 +86,19 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
 
     event OracleAddressUpdated(address oldOracle, address newOracle);
     event MinScoreUpdated(uint256 oldMin, uint256 newMin);
+    event SovereignIDConfigUpdated(address indexed contractAddress, bool required);
 
     // ── Errors ────────────────────────────────────────────────────────────────
     error InvalidOracleSignature();
     error EventAlreadyProcessed(bytes32 eventId);
-    error NonceAlreadyUsed(string nonce);
+    error NonceAlreadyUsed(bytes32 nonceHash);
     error PayloadExpired(uint256 expiredAt, uint256 currentTime);
     error ScoreBelowMinimum(uint256 score, uint256 minimum);
     error InvalidAddress();
     error ZeroAmount();
     error NativeMintFailed();
+    error NoSovereignID(address volunteer);
+    error SovereignIDRevoked(address volunteer);
 
     // ── Constructor ───────────────────────────────────────────────────────────
     constructor(
@@ -98,7 +118,7 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    //  CORE: RELEASE REWARD — Mint GOOD native coin langsung ke volunteer
+    //  CORE: RELEASE REWARD
     // ══════════════════════════════════════════════════════════════════════════
 
     function releaseReward(
@@ -120,13 +140,26 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         if (beneficiaryAddress == address(0)) revert InvalidAddress();
         if (tokenRewardWei     == 0)          revert ZeroAmount();
 
-        if (_usedEventIds[eventId])   revert EventAlreadyProcessed(eventId);
-        if (_usedNonces[nonce])       revert NonceAlreadyUsed(nonce);
+        if (_usedEventIds[eventId]) revert EventAlreadyProcessed(eventId);
+
+        bytes32 nonceHash = keccak256(bytes(nonce));
+        if (_usedNonces[nonceHash]) revert NonceAlreadyUsed(nonceHash);
+
         if (block.timestamp > expiresAt) revert PayloadExpired(expiresAt, block.timestamp);
         if (impactScoreScaled < minImpactScoreToRelease)
             revert ScoreBelowMinimum(impactScoreScaled, minImpactScoreToRelease);
 
+        // ── SovereignID Guard (opt-in) ────────────────────────────────────────
+        if (requireSovereignID && address(sovereignIDContract) != address(0)) {
+            if (!sovereignIDContract.hasIdentity(volunteerAddress))
+                revert NoSovereignID(volunteerAddress);
+            (,,,, bool isActive,) = sovereignIDContract.getIdentity(volunteerAddress);
+            if (!isActive) revert SovereignIDRevoked(volunteerAddress);
+        }
+
         // ── Verify Oracle Signature ───────────────────────────────────────────
+        // FIX v2.1.0: Uses abi.encode (not abi.encodePacked) to prevent
+        // hash-collision attacks from adjacent dynamic types (string nonce).
         bytes32 signingHash = _buildSigningHash(
             eventId, volunteerAddress, beneficiaryAddress,
             impactScoreScaled, tokenRewardWei,
@@ -138,16 +171,10 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         if (recovered != oracleAddress) revert InvalidOracleSignature();
 
         // ── Mark as Processed (anti-replay) ──────────────────────────────────
-        _usedEventIds[eventId] = true;
-        _usedNonces[nonce]     = true;
+        _usedEventIds[eventId]  = true;
+        _usedNonces[nonceHash]  = true;
 
-        // ── Mint GOOD native coin langsung ke volunteer ───────────────────────
-        // Ini pakai Avalanche NativeMinter Precompile — bukan ERC-20 lagi!
-        // GOOD yang di-mint ini = koin utama APEX Network, bisa langsung:
-        //   ✅ Bayar gas fee
-        //   ✅ Transfer ke orang lain
-        //   ✅ Untuk voting governance
-        //   ✅ Langsung muncul di MetaMask sebagai main balance
+        // ── Mint APEX native coin to volunteer ────────────────────────────────
         NATIVE_MINTER.mintNativeCoin(volunteerAddress, tokenRewardWei);
 
         // ── Update Reputation Ledger ──────────────────────────────────────────
@@ -193,6 +220,18 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         minImpactScoreToRelease = newMin;
     }
 
+    /// @notice Configure the SovereignID integration.
+    /// @param _contract Address of deployed SovereignID.sol (use address(0) to disable).
+    /// @param _required If true, volunteers MUST have an active SovereignID to claim rewards.
+    function setSovereignIDConfig(
+        address _contract,
+        bool    _required
+    ) external onlyRole(DAO_ADMIN_ROLE) {
+        sovereignIDContract = ISovereignID(_contract);
+        requireSovereignID  = _required;
+        emit SovereignIDConfigUpdated(_contract, _required);
+    }
+
     function pause()   external onlyRole(DAO_ADMIN_ROLE) { _pause(); }
     function unpause() external onlyRole(DAO_ADMIN_ROLE) { _unpause(); }
 
@@ -205,7 +244,7 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
     }
 
     function isNonceUsed(string calldata nonce) external view returns (bool) {
-        return _usedNonces[nonce];
+        return _usedNonces[keccak256(bytes(nonce))];
     }
 
     function getStats() external view returns (
@@ -214,7 +253,6 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         uint256 eventsVerified,
         uint256 currentBalance
     ) {
-        // deposited = 0 (tidak ada escrow lagi, langsung mint)
         return (0, totalFundsDistributed, totalEventsVerified, address(this).balance);
     }
 
@@ -225,6 +263,9 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
     //  INTERNAL
     // ══════════════════════════════════════════════════════════════════════════
 
+    /// @dev FIX v2.1.0 — uses abi.encode (not abi.encodePacked) to prevent hash
+    /// collision attacks.  abi.encode pads every type to 32-byte slots so two
+    /// different (a, b) pairs can never produce the same packed bytes.
     function _buildSigningHash(
         bytes32 eventId,
         address volunteerAddress,
@@ -236,7 +277,7 @@ contract BenevolenceVault is AccessControl, ReentrancyGuard, Pausable {
         string  calldata nonce,
         uint256 expiresAt
     ) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(
+        return keccak256(abi.encode(
             eventId,
             volunteerAddress,
             beneficiaryAddress,

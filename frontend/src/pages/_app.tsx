@@ -11,8 +11,8 @@ const apexNetwork = defineChain({
   name: "APEXNETWORK",
   nativeCurrency: {
     decimals: 18,
-    name:     "GOOD Token",
-    symbol:   "GOOD",
+    name:     "APEX Token",
+    symbol:   "APEX",
   },
   rpcUrls: {
     default: {
