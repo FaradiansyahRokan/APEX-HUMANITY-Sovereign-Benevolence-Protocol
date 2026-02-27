@@ -28,11 +28,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 def _reload_fraud_module():
     """
-    Reload fraud_detector module to reset in-memory global stores
-    (_seen_sha256, _seen_phash, _submit_times) between test classes.
+    Reload fraud_detector module and clear Redis test keys
+    to guarantee isolation between tests.
     """
     import engine.fraud_detector as fd
     importlib.reload(fd)
+    
+    # Clear test keys namespace
+    keys = fd.redis_client.keys("satin:fraud:*")
+    if keys:
+        fd.redis_client.delete(*keys)
+        
     return fd
 
 

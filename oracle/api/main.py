@@ -20,18 +20,18 @@ import os
 import secrets
 import time
 import uuid
+import json
+import redis
 from typing import Any, Dict, List, Optional
 
-# ─── In-memory challenge nonce store ──────────────────────────────────────────
-_challenge_store: dict[str, int] = {}
+# ─── Persistent State (Redis) ─────────────────────────────────────────────────
+# Using Redis to ensuring state survives server restarts.
+redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
-# ─── Community Stream store ───────────────────────────────────────────────────
-# Keeps the last 100 verified submissions for the live feed.
-_stream_store: list[dict] = []
-
-# ─── Community Vote store ─────────────────────────────────────────────────────
-# { event_id: { "votes": {addr: "approve"|"reject"}, "opened_at": unix, "outcome": None|"approved"|"rejected" } }
-_vote_store: dict[str, dict] = {}
+try:
+    redis_client.ping()
+except redis.ConnectionError:
+    pass # Wait for connection, or fail gracefully
 
 # Thresholds
 COMMUNITY_REVIEW_CONFIDENCE = 0.30   # ai_confidence below this → flagged
@@ -320,15 +320,12 @@ async def get_challenge(api_key: str = Security(verify_api_key)) -> Dict[str, An
     write on a piece of paper and hold in the evidence photo.
     Valid for 10 minutes. Oracle will check for it via OCR if EasyOCR is installed.
     """
-    # Prune expired
+    # Prune expired (handled natively by Redis TTL, no manual prune needed)
     now = int(time.time())
-    expired = [k for k, exp in _challenge_store.items() if exp < now]
-    for k in expired:
-        _challenge_store.pop(k, None)
 
     code       = f"APEX-{secrets.randbelow(9000) + 1000}"  # APEX-1000 to APEX-9999
     expires_at = now + 600  # 10 minutes
-    _challenge_store[code] = expires_at
+    redis_client.setex(f"satin:challenge:{code}", 600, expires_at)
 
     log.info(f"[CHALLENGE] Issued: {code} (expires {expires_at})")
     return {
@@ -441,14 +438,14 @@ async def verify_impact(
                     "needs_community_review": True,
                     "submitted_at":           int(time.time()),
                 }
-                _stream_store.append(low_score_entry)
-                if len(_stream_store) > 100:
-                    _stream_store.pop(0)
-                _vote_store[event_id] = {
+                redis_client.lpush("satin:stream_store", json.dumps(low_score_entry))
+                redis_client.ltrim("satin:stream_store", 0, 99)
+                vote_data = {
                     "votes":     {},
                     "opened_at": int(time.time()),
                     "outcome":   None,
                 }
+                redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vote_data))
                 # Return a minimal response so frontend shows community review state
                 return {
                     "event_id":               event_id,
@@ -488,16 +485,16 @@ async def verify_impact(
             "needs_community_review": needs_review,
             "submitted_at":       int(time.time()),
         }
-        _stream_store.append(stream_entry)
-        if len(_stream_store) > 100:
-            _stream_store.pop(0)
+        redis_client.lpush("satin:stream_store", json.dumps(stream_entry))
+        redis_client.ltrim("satin:stream_store", 0, 99)
 
         if needs_review:
-            _vote_store[payload.event_id] = {
+            vote_data = {
                 "votes":      {},
                 "opened_at": int(time.time()),
                 "outcome":   None,
             }
+            redis_client.set(f"satin:vote_store:{payload.event_id}", json.dumps(vote_data))
             log.info(f"[STREAM] Submission flagged for community review: {payload.event_id} (confidence={payload.ai_confidence:.2f})")
 
         fraud_detector.record_sha256(body.hash_sha256, body.volunteer_address)
@@ -538,14 +535,16 @@ async def batch_verify(
 @app.get("/api/v1/stream", summary="Community Activity Stream")
 async def get_stream(api_key: str = Security(verify_api_key)) -> Dict[str, Any]:
     """Returns the last 50 verified submissions, most recent first."""
-    feed = list(reversed(_stream_store[-50:]))
+    feed_raw = redis_client.lrange("satin:stream_store", 0, 49)
+    feed = [json.loads(item) for item in feed_raw] # lpush already puts newest first
     # Attach vote info to flagged entries
     enriched = []
     for entry in feed:
         e = dict(entry)
         eid = e["event_id"]
-        if eid in _vote_store:
-            vd = _vote_store[eid]
+        vd_raw = redis_client.get(f"satin:vote_store:{eid}")
+        if vd_raw:
+            vd = json.loads(vd_raw)
             votes = vd["votes"]
             approve = sum(1 for v in votes.values() if v == "approve")
             reject  = sum(1 for v in votes.values() if v == "reject")
@@ -576,13 +575,15 @@ async def cast_vote(
     api_key: str = Security(verify_api_key),
 ) -> Dict[str, Any]:
     eid = body.event_id
-    if eid not in _vote_store:
+    vd_raw = redis_client.get(f"satin:vote_store:{eid}")
+    if not vd_raw:
         raise HTTPException(status_code=404, detail="Submission not flagged for community review.")
+    vd = json.loads(vd_raw)
 
     if body.vote not in ("approve", "reject"):
         raise HTTPException(status_code=422, detail="vote must be 'approve' or 'reject'.")
 
-    vd = _vote_store[eid]
+    # vd = _vote_store[eid] -> now parsed from redis
     if vd["outcome"]:
         raise HTTPException(status_code=409, detail=f"Voting already concluded: {vd['outcome']}.")
 
@@ -647,7 +648,15 @@ async def cast_vote(
 
     # Prevent self-voting
     voter = body.voter_address.lower()
-    stream_entry = next((e for e in _stream_store if e["event_id"] == eid), None)
+    
+    feed_raw = redis_client.lrange("satin:stream_store", 0, -1)
+    stream_entry = None
+    for item in feed_raw:
+        entry = json.loads(item)
+        if entry["event_id"] == eid:
+            stream_entry = entry
+            break
+            
     if stream_entry and voter == stream_entry["volunteer_address"].lower():
         raise HTTPException(status_code=403, detail="You cannot vote on your own submission.")
 
@@ -669,7 +678,6 @@ async def cast_vote(
 
         if outcome == "approved" and "claim_payload" not in vd:
             # ── Build community claim payload with fixed minimum reward ──────
-            stream_entry = next((e for e in _stream_store if e["event_id"] == eid), None)
             if stream_entry:
                 try:
                     payload_dict, contract_args = _build_community_claim_payload(stream_entry)
@@ -677,6 +685,9 @@ async def cast_vote(
                     vd["claim_contract_args"] = contract_args
                 except Exception as ce:
                     log.error(f"[VOTE] Failed to generate claim payload for {eid}: {ce}")
+
+    # Save updated vote state to Redis
+    redis_client.set(f"satin:vote_store:{eid}", json.dumps(vd))
 
     return {
         "event_id":  eid,
@@ -693,22 +704,31 @@ async def get_claim(
     event_id: str,
     api_key:  str = Security(verify_api_key),
 ) -> Dict[str, Any]:
-    """Returns the oracle-signed payload for an approved community submission so the frontend can call releaseReward."""
-    vd = _vote_store.get(event_id)
-    if not vd:
+    vd_raw = redis_client.get(f"satin:vote_store:{event_id}")
+    if not vd_raw:
         raise HTTPException(status_code=404, detail="Event not found in vote store.")
+    
+    vd = json.loads(vd_raw)
     if vd.get("outcome") != "approved":
         raise HTTPException(status_code=409, detail=f"Vote outcome is '{vd.get('outcome')}', not 'approved'.")
 
     # ── Lazy generation: build community claim payload on-demand ─────────────
     if "claim_payload" not in vd:
-        stream_entry = next((e for e in _stream_store if e["event_id"] == event_id), None)
+        feed_raw = redis_client.lrange("satin:stream_store", 0, -1)
+        stream_entry = None
+        for item in feed_raw:
+            entry = json.loads(item)
+            if entry["event_id"] == event_id:
+                stream_entry = entry
+                break
+                
         if not stream_entry:
             raise HTTPException(status_code=503, detail="Stream entry not found — server may have restarted.")
         try:
             payload_dict, contract_args  = _build_community_claim_payload(stream_entry)
             vd["claim_payload"]          = payload_dict
             vd["claim_contract_args"]    = contract_args
+            redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vd))
         except Exception as ce:
             log.error(f"[CLAIM] Failed to generate claim payload for {event_id}: {ce}")
             raise HTTPException(status_code=503, detail=f"Could not generate claim payload: {ce}")

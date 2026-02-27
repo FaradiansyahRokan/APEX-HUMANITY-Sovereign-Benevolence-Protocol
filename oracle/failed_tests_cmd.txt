@@ -1,0 +1,178 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.2.2, pluggy-1.6.0 -- E:\BELAJAR\BLOCKCHAIN\apex-humanity\oracle\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: E:\BELAJAR\BLOCKCHAIN\apex-humanity\oracle
+plugins: anyio-4.4.0, asyncio-0.23.7
+asyncio: mode=Mode.STRICT
+collecting ... collected 50 items
+
+tests/test_fraud_detector.py::TestRateLimit::test_first_submission_passes FAILED [  2%]
+tests/test_fraud_detector.py::TestRateLimit::test_within_limit_passes FAILED [  4%]
+tests/test_fraud_detector.py::TestRateLimit::test_exceeds_limit_fails PASSED [  6%]
+tests/test_fraud_detector.py::TestRateLimit::test_different_addresses_independent PASSED [  8%]
+tests/test_fraud_detector.py::TestSHA256Dedup::test_new_hash_passes FAILED [ 10%]
+tests/test_fraud_detector.py::TestSHA256Dedup::test_duplicate_same_address PASSED [ 12%]
+tests/test_fraud_detector.py::TestSHA256Dedup::test_duplicate_different_address PASSED [ 14%]
+tests/test_fraud_detector.py::TestSHA256Dedup::test_different_hashes_both_pass PASSED [ 16%]
+tests/test_fraud_detector.py::TestSHA256Dedup::test_case_insensitive PASSED [ 18%]
+tests/test_fraud_detector.py::TestEXIFValidation::test_no_image_no_penalty PASSED [ 20%]
+tests/test_fraud_detector.py::TestEXIFValidation::test_no_exif_adds_penalty PASSED [ 22%]
+tests/test_fraud_detector.py::TestEXIFValidation::test_live_capture_skips_exif_check PASSED [ 24%]
+tests/test_fraud_detector.py::TestEXIFValidation::test_penalty_capped_at_50_percent PASSED [ 26%]
+tests/test_fraud_detector.py::TestELAAnalysis::test_no_image_no_penalty PASSED [ 28%]
+tests/test_fraud_detector.py::TestELAAnalysis::test_authentic_image_no_penalty PASSED [ 30%]
+tests/test_fraud_detector.py::TestELAAnalysis::test_ela_score_is_numeric PASSED [ 32%]
+tests/test_fraud_detector.py::TestELAAnalysis::test_suspicious_verdict_has_penalty PASSED [ 34%]
+tests/test_fraud_detector.py::TestCheckAll::test_clean_submission_passes FAILED [ 36%]
+tests/test_fraud_detector.py::TestCheckAll::test_rate_limit_block_propagates PASSED [ 38%]
+tests/test_fraud_detector.py::TestCheckAll::test_sha256_block_propagates PASSED [ 40%]
+tests/test_fraud_detector.py::TestCheckAll::test_penalty_capped_at_60_percent FAILED [ 42%]
+tests/test_fraud_detector.py::TestCheckAll::test_live_capture_no_exif_penalty FAILED [ 44%]
+tests/test_fraud_detector.py::TestCheckAll::test_warnings_list_present PASSED [ 46%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_score_range_all_action_types PASSED [ 48%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_zero_ai_confidence_gives_zero_score PASSED [ 50%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_urgency_critical_higher_than_low PASSED [ 52%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_disaster_relief_highest_base PASSED [ 54%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_effort_hours_increases_score PASSED [ 56%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_effort_hours_capped_at_72 PASSED [ 58%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_poverty_index_increases_score PASSED [ 60%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_poverty_index_clamped PASSED [ 62%]
+tests/test_impact_evaluator.py::TestImpactScoreCalculator::test_score_max_100 PASSED [ 64%]
+tests/test_impact_evaluator.py::TestTokenRewardCap::test_max_token_reward_is_100 PASSED [ 66%]
+tests/test_impact_evaluator.py::TestTokenRewardCap::test_token_reward_capped_at_100 PASSED [ 68%]
+tests/test_impact_evaluator.py::TestTokenRewardCap::test_token_reward_formula_at_extreme PASSED [ 70%]
+tests/test_impact_evaluator.py::TestGPSAuthenticityChecker::test_valid_coordinates_pass PASSED [ 72%]
+tests/test_impact_evaluator.py::TestGPSAuthenticityChecker::test_out_of_range_latitude PASSED [ 74%]
+tests/test_impact_evaluator.py::TestGPSAuthenticityChecker::test_out_of_range_longitude PASSED [ 76%]
+tests/test_impact_evaluator.py::TestGPSAuthenticityChecker::test_yemen_in_high_need_zone PASSED [ 78%]
+tests/test_impact_evaluator.py::TestGPSAuthenticityChecker::test_random_pacific_not_in_zone PASSED [ 80%]
+tests/test_impact_evaluator.py::TestGPSAuthenticityChecker::test_haversine_distance PASSED [ 82%]
+tests/test_impact_evaluator.py::TestImageResize::test_small_image_unchanged PASSED [ 84%]
+tests/test_impact_evaluator.py::TestImageResize::test_large_image_reduced PASSED [ 86%]
+tests/test_impact_evaluator.py::TestImageResize::test_output_is_valid_jpeg PASSED [ 88%]
+tests/test_impact_evaluator.py::TestImageResize::test_invalid_bytes_returns_original PASSED [ 90%]
+tests/test_impact_evaluator.py::TestPedersenZKP::test_valid_proof_passes FAILED [ 92%]
+tests/test_impact_evaluator.py::TestPedersenZKP::test_empty_proof_hash_fails PASSED [ 94%]
+tests/test_impact_evaluator.py::TestPedersenZKP::test_short_proof_hash_fails PASSED [ 96%]
+tests/test_impact_evaluator.py::TestPedersenZKP::test_empty_public_signals_fails PASSED [ 98%]
+tests/test_impact_evaluator.py::TestPedersenZKP::test_non_hex_public_signal_backward_compat PASSED [100%]
+
+================================== FAILURES ===================================
+_________________ TestRateLimit.test_first_submission_passes __________________
+
+self = <test_fraud_detector.TestRateLimit object at 0x0000021388485BD0>
+
+    def test_first_submission_passes(self):
+        result = self.detector.check_rate_limit(self.addr)
+>       assert result["ok"] is True
+E       assert False is True
+
+tests\test_fraud_detector.py:71: AssertionError
+___________________ TestRateLimit.test_within_limit_passes ____________________
+
+self = <test_fraud_detector.TestRateLimit object at 0x0000021388486210>
+
+    def test_within_limit_passes(self):
+        max_s = self.fd_mod.MAX_SUBMITS_WINDOW
+        for _ in range(max_s - 1):
+            self.detector.record_submission(self.addr)
+        result = self.detector.check_rate_limit(self.addr)
+>       assert result["ok"] is True
+E       assert False is True
+
+tests\test_fraud_detector.py:78: AssertionError
+____________________ TestSHA256Dedup.test_new_hash_passes _____________________
+
+self = <test_fraud_detector.TestSHA256Dedup object at 0x00000213884860D0>
+
+    def test_new_hash_passes(self):
+        result = self.detector.check_sha256(self.hash1, self.addr_a)
+>       assert result["ok"] is True
+E       assert False is True
+
+tests\test_fraud_detector.py:112: AssertionError
+__________________ TestCheckAll.test_clean_submission_passes __________________
+
+self = <test_fraud_detector.TestCheckAll object at 0x0000021388486990>
+
+    def test_clean_submission_passes(self):
+        result = self.detector.check_all(
+            volunteer_address=self.addr,
+            hash_sha256=self.hash,
+            image_bytes=None,
+        )
+>       assert result["ok"] is True
+E       assert False is True
+
+tests\test_fraud_detector.py:247: AssertionError
+_______________ TestCheckAll.test_penalty_capped_at_60_percent ________________
+
+self = <test_fraud_detector.TestCheckAll object at 0x000002138846E8B0>
+
+    def test_penalty_capped_at_60_percent(self):
+        """Accumulated penalty from all soft checks must never exceed 0.60."""
+        img_bytes = _make_tiny_jpeg()
+        result = self.detector.check_all(
+            volunteer_address=self.addr,
+            hash_sha256="d" * 64,
+            image_bytes=img_bytes,
+            submit_lat=14.4974,
+            submit_lon=46.9611,
+            source="gallery",
+        )
+>       assert result["ok"] is True
+E       assert False is True
+
+tests\test_fraud_detector.py:273: AssertionError
+_______________ TestCheckAll.test_live_capture_no_exif_penalty ________________
+
+self = <test_fraud_detector.TestCheckAll object at 0x0000021388413AD0>
+
+    def test_live_capture_no_exif_penalty(self):
+        """live_capture source should skip EXIF penalty."""
+        img_bytes = _make_tiny_jpeg()
+        result = self.detector.check_all(
+            volunteer_address=self.addr,
+            hash_sha256="e" * 64,
+            image_bytes=img_bytes,
+            submit_lat=0.0,
+            submit_lon=0.0,
+            source="live_capture",
+        )
+>       assert result["ok"] is True
+E       assert False is True
+
+tests\test_fraud_detector.py:287: AssertionError
+___________________ TestPedersenZKP.test_valid_proof_passes ___________________
+
+self = <test_impact_evaluator.TestPedersenZKP object at 0x00000213C3FB5BD0>
+evaluator = <engine.impact_evaluator.ImpactEvaluator object at 0x00000213C44223C0>
+
+    def test_valid_proof_passes(self, evaluator):
+        """A valid 64-char hex proof_hash with non-zero public signals should pass."""
+        proof_hash = "deadbeefcafe1234" * 4  # 64 chars
+        zkp = self._make_zkp(proof_hash, ["1"])
+        result = evaluator._verify_zkp(zkp)
+>       assert result is True
+E       assert False is True
+
+tests\test_impact_evaluator.py:301: AssertionError
+----------------------------- Captured log setup ------------------------------
+WARNING  satin.oracle:impact_evaluator.py:480 No private key provided — generating ephemeral key (DEV ONLY)
+------------------------------ Captured log call ------------------------------
+WARNING  satin.oracle:impact_evaluator.py:847 [ZKP] Pedersen commitment mismatch: claimed=0x1 derived=0x10acf39866b102b0b8d85b74b7a78bb6e24fb1f3ca4c49244
+============================== warnings summary ===============================
+.venv\Lib\site-packages\websockets\legacy\__init__.py:6
+  E:\BELAJAR\BLOCKCHAIN\apex-humanity\oracle\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_fraud_detector.py::TestRateLimit::test_first_submission_passes
+FAILED tests/test_fraud_detector.py::TestRateLimit::test_within_limit_passes
+FAILED tests/test_fraud_detector.py::TestSHA256Dedup::test_new_hash_passes - ...
+FAILED tests/test_fraud_detector.py::TestCheckAll::test_clean_submission_passes
+FAILED tests/test_fraud_detector.py::TestCheckAll::test_penalty_capped_at_60_percent
+FAILED tests/test_fraud_detector.py::TestCheckAll::test_live_capture_no_exif_penalty
+FAILED tests/test_impact_evaluator.py::TestPedersenZKP::test_valid_proof_passes
+=================== 7 failed, 43 passed, 1 warning in 7.83s ===================

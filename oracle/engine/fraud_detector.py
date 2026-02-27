@@ -39,10 +39,15 @@ GPS_MISMATCH_KM      = float(os.getenv("FRAUD_GPS_MISMATCH_KM", "50"))   # jarak
 ELA_THRESHOLD        = float(os.getenv("FRAUD_ELA_THRESHOLD", "35.0"))   # mean ELA > 35 = edited
 
 
-# ── In-memory stores ──────────────────────────────────────────────────────────
-_seen_sha256:  dict[str, str]              = {}
-_seen_phash:   list[tuple[str, str, int]]  = []
-_submit_times: dict[str, list[int]]        = defaultdict(list)
+# ── Persistent Stores (Redis) ──────────────────────────────────────────────────
+import redis
+import json
+
+redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+try:
+    redis_client.ping()
+except redis.ConnectionError:
+    pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -211,25 +216,41 @@ class FraudDetector:
         now = int(time.time())
         addr = volunteer_address.lower()
         window_start = now - RATE_WINDOW_SEC
-        _submit_times[addr] = [t for t in _submit_times[addr] if t >= window_start]
-        count = len(_submit_times[addr])
+        
+        rk = f"satin:fraud:rate:{addr}"
+        times_raw = redis_client.get(rk)
+        times = json.loads(times_raw) if times_raw else []
+        times = [t for t in times if t >= window_start]
+        
+        count = len(times)
         if count >= MAX_SUBMITS_WINDOW:
-            wait = _submit_times[addr][0] + RATE_WINDOW_SEC - now
+            wait = times[0] + RATE_WINDOW_SEC - now
             return {
                 "ok":     False,
                 "reason": f"Rate limit: max {MAX_SUBMITS_WINDOW} submissions "
                           f"per {RATE_WINDOW_SEC // 3600}h. Try again in {wait}s.",
             }
+        
+        # Save pruned list back
+        if times:
+            redis_client.set(rk, json.dumps(times))
+        else:
+            redis_client.delete(rk)
+            
         return {"ok": True}
 
     def record_submission(self, volunteer_address: str) -> None:
-        _submit_times[volunteer_address.lower()].append(int(time.time()))
+        rk = f"satin:fraud:rate:{volunteer_address.lower()}"
+        times_raw = redis_client.get(rk)
+        times = json.loads(times_raw) if times_raw else []
+        times.append(int(time.time()))
+        redis_client.set(rk, json.dumps(times))
 
     # ── SHA-256 exact dedup ────────────────────────────────────────────────────
     def check_sha256(self, hash_sha256: str, volunteer_address: str) -> dict:
         key = hash_sha256.lower()
-        if key in _seen_sha256:
-            first = _seen_sha256[key]
+        first = redis_client.get(f"satin:fraud:sha256:{key}")
+        if first:
             reason = (
                 "Duplicate evidence: kamu sudah pernah submit file yang sama sebelumnya."
                 if first == volunteer_address.lower()
@@ -240,8 +261,7 @@ class FraudDetector:
 
     def record_sha256(self, hash_sha256: str, volunteer_address: str) -> None:
         key = hash_sha256.lower()
-        if key not in _seen_sha256:
-            _seen_sha256[key] = volunteer_address.lower()
+        redis_client.setnx(f"satin:fraud:sha256:{key}", volunteer_address.lower())
 
     # ── Perceptual hash near-dup ───────────────────────────────────────────────
     def check_image_phash(self, image_bytes: bytes, volunteer_address: str) -> dict:
@@ -252,7 +272,11 @@ class FraudDetector:
             return {"ok": True}
         now = int(time.time())
         window = now - (7 * 24 * 3600)
-        for (ph, pw, pt) in _seen_phash:
+        
+        seen_raw = redis_client.lrange("satin:fraud:phash", 0, -1)
+        for item_raw in seen_raw:
+            item = json.loads(item_raw)
+            ph, pw, pt = item["h"], item["v"], item["t"]
             if pt < window:
                 continue
             dist = _hamming_distance(dh, ph)
@@ -262,9 +286,11 @@ class FraudDetector:
                     "reason": f"Near-duplicate image detected (visual similarity distance "
                               f"{dist} < threshold {PHASH_THRESHOLD}). Sybil attack blocked.",
                 }
-        _seen_phash.append((dh, volunteer_address.lower(), now))
-        if len(_seen_phash) > 10_000:
-            _seen_phash[:] = _seen_phash[-8_000:]
+                
+        # Record successful phash
+        new_item = {"h": dh, "v": volunteer_address.lower(), "t": now}
+        redis_client.lpush("satin:fraud:phash", json.dumps(new_item))
+        redis_client.ltrim("satin:fraud:phash", 0, 9999)
         return {"ok": True}
 
     # ── Layer 3: EXIF Validation ───────────────────────────────────────────────
