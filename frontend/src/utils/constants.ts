@@ -32,11 +32,11 @@ export const URGENCY_LEVELS = [
 ];
 
 export const REPUTATION_RANKS = [
-  { rank: "CITIZEN",   threshold: 0,     color: "gray",    icon: "👤", description: "Beginning the journey" },
-  { rank: "GUARDIAN",  threshold: 100,   color: "blue",    icon: "🛡️", description: "Protector of the vulnerable" },
-  { rank: "CHAMPION",  threshold: 500,   color: "purple",  icon: "⚔️", description: "Champion of equity" },
-  { rank: "SOVEREIGN", threshold: 2000,  color: "gold",    icon: "👑", description: "Sovereign of benevolence" },
-  { rank: "APEX",      threshold: 10000, color: "rainbow", icon: "⚡", description: "Apex of humanity" },
+  { rank: "CITIZEN",   threshold: 0,     color: "gray",    icon: "citizen",   description: "Beginning the journey" },
+  { rank: "GUARDIAN",  threshold: 100,   color: "blue",    icon: "guardian",  description: "Protector of the vulnerable" },
+  { rank: "CHAMPION",  threshold: 500,   color: "purple",  icon: "champion",  description: "Champion of equity" },
+  { rank: "SOVEREIGN", threshold: 2000,  color: "gold",    icon: "sovereign", description: "Sovereign of benevolence" },
+  { rank: "APEX",      threshold: 10000, color: "rainbow", icon: "apex",      description: "Apex of humanity" },
 ];
 
 export const getRank = (score: number) => {
