@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAccount, useReadContract } from "wagmi";
+import { useAccount, useReadContract, useBalance } from "wagmi"; // <-- Tambahkan useBalance
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { formatUnits } from "viem";
-import { REPUTATION_LEDGER_ABI, IMPACT_TOKEN_ABI } from "@/utils/abis";
+// IMPACT_TOKEN_ABI dihapus karena sudah tidak dipakai
+import { REPUTATION_LEDGER_ABI } from "@/utils/abis";
 import { CONTRACTS } from "@/utils/constants";
 import SubmitImpactForm  from "@/components/SubmitImpactForm";
 import ReputationCard    from "@/components/ReputationCard";
 import Leaderboard       from "@/components/Leaderboard";
 import VaultStats        from "@/components/VaultStats";
-import ImpactFeed        from "@/components/ImpactFeed";
+import ImpactFeed        from "@/components/Impactfeed";
 import Badges            from "@/components/Badges";
 
 type TabId = "submit"|"profile"|"feed"|"badges"|"leaderboard";
@@ -120,24 +120,27 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
+  // 1. Fetch Reputation dari L1 Contract
   const { data: repData } = useReadContract({
     address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
     abi: REPUTATION_LEDGER_ABI, functionName:"getReputation",
     args: address ? [address] : ["0x0000000000000000000000000000000000000000"],
     query: { enabled:!!address, refetchInterval:8_000 },
   });
-  const { data: goodBalance } = useReadContract({
-    address: CONTRACTS.GOOD_TOKEN as `0x${string}`,
-    abi: IMPACT_TOKEN_ABI, functionName:"balanceOf",
-    args: address ? [address] : ["0x0000000000000000000000000000000000000000"],
-    query: { enabled:!!address, refetchInterval:8_000 },
+
+  // 2. Fetch Saldo Koin Native APEX L1 menggunakan useBalance
+  const { data: nativeBalance } = useBalance({
+    address: address as `0x${string}`,
+    query: { enabled: !!address, refetchInterval: 8_000 },
   });
 
   if (!mounted) return null;
 
   const score   = repData ? Number((repData as any)[0]) / 100 : 0;
-  const goodFmt = goodBalance
-    ? Number(formatUnits(goodBalance as bigint, 18)).toLocaleString(undefined, { maximumFractionDigits:2 })
+  
+  // Format saldo koin native APEX
+  const apexFmt = nativeBalance
+    ? Number(nativeBalance.formatted).toLocaleString("en-US", { maximumFractionDigits: 2 })
     : "0";
 
   return (
@@ -158,7 +161,7 @@ export default function Home() {
         }}>
           <Logo />
           <div style={{display:"flex", alignItems:"center", gap:"10px"}}>
-            {isConnected && goodBalance !== undefined && (
+            {isConnected && nativeBalance !== undefined && (
               <div style={{
                 display:"flex", alignItems:"center", gap:"8px",
                 padding:"6px 14px", borderRadius:"var(--r1)",
@@ -168,7 +171,7 @@ export default function Home() {
                   fontFamily:"'JetBrains Mono',monospace",
                   fontSize:"12px", fontWeight:500, color:"var(--go)",
                 }}>
-                  {goodFmt}<span style={{color:"rgba(255,189,89,0.5)",marginLeft:"5px"}}>GOOD</span>
+                  {apexFmt}<span style={{color:"rgba(255,189,89,0.5)",marginLeft:"5px"}}>APEX</span>
                 </span>
               </div>
             )}
@@ -201,7 +204,7 @@ export default function Home() {
           }}>
             <span className="dot dot-mi" style={{width:"6px", height:"6px"}}/>
             <span className="label" style={{color:"var(--mi)", letterSpacing:"0.12em"}}>
-              Live on Polygon · SATIN Oracle
+              Live on APEX Local L1 · SATIN Oracle
             </span>
           </div>
 
@@ -230,7 +233,7 @@ export default function Home() {
             {[
               { val:"94,301", label:"Events Verified", color:"var(--mi)" },
               { val:"12,847", label:"Volunteers",       color:"var(--vi)" },
-              { val:"8.2M",   label:"GOOD Distributed", color:"var(--go)" },
+              { val:"8.2M",   label:"APEX Distributed", color:"var(--go)" },
             ].map((s,i) => (
               <div key={s.label} style={{
                 padding:"16px 28px",
@@ -297,13 +300,13 @@ export default function Home() {
             </div>
 
             <div style={{textAlign:"right"}}>
-              <p className="label" style={{marginBottom:"4px"}}>GOOD Balance</p>
+              <p className="label" style={{marginBottom:"4px"}}>APEX Balance</p>
               <p style={{
                 fontFamily:"'JetBrains Mono',monospace",
                 fontSize:"18px", fontWeight:600,
                 color:"var(--go)",
                 textShadow:"0 0 16px var(--go-glow)",
-              }}>{goodFmt}</p>
+              }}>{apexFmt}</p>
             </div>
           </div>
 
@@ -388,7 +391,7 @@ export default function Home() {
                 fontWeight:700, fontSize:"18px", color:"var(--t0)", marginBottom:"9px",
               }}>Connect to Start</p>
               <p style={{fontSize:"14px", color:"var(--t1)", lineHeight:1.7}}>
-                Connect your wallet to submit impact proofs, earn GOOD tokens,
+                Connect your wallet to submit impact proofs, earn APEX tokens,
                 and build your on-chain Reputation Capital.
               </p>
             </div>
@@ -426,10 +429,10 @@ export default function Home() {
         display:"flex", alignItems:"center", justifyContent:"space-between",
         flexWrap:"wrap", gap:"12px",
       }}>
-        <p className="label">© 2025 Apex Humanity Protocol</p>
+        <p className="label">© 2026 Apex Humanity Protocol</p>
         <div style={{display:"flex", gap:"8px", alignItems:"center"}}>
           <span className="dot dot-mi" style={{width:"4px", height:"4px"}}/>
-          <p className="label">SATIN Oracle · ZKP Shield · Polygon Network</p>
+          <p className="label">SATIN Oracle · ZKP Shield · APEX Local Subnet</p>
         </div>
       </footer>
     </div>

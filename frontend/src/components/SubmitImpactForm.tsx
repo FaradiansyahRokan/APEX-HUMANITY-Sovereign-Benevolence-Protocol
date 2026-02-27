@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useAccount, useWriteContract } from "wagmi";
+import { useAccount, useWriteContract, usePublicClient } from "wagmi"; // <-- Tambahkan usePublicClient
 import { pad } from "viem";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS } from "../utils/constants";
@@ -21,6 +21,7 @@ const STEPS = [
 
 export default function SubmitImpactForm() {
   const { address } = useAccount();
+  const publicClient = usePublicClient()
   const fileRef = useRef<HTMLInputElement>(null);
   const [file,setFile]   = useState<File|null>(null);
   const [step,setStep]   = useState<Step>("form");
@@ -79,6 +80,7 @@ export default function SubmitImpactForm() {
       const ca=real.contract_args;
       if(!address||!CONTRACTS.BENEVOLENCE_VAULT) throw new Error("Wallet not connected");
 
+      // 1. Lempar transaksi ke jaringan
       const hash=await writeContractAsync({
         address:CONTRACTS.BENEVOLENCE_VAULT as `0x${string}`,
         abi:BENEVOLENCE_VAULT_ABI, functionName:"releaseReward",
@@ -94,7 +96,20 @@ export default function SubmitImpactForm() {
           real.signature.r as `0x${string}`,
           real.signature.s as `0x${string}`,
         ],
+        gas: 800000n,
       });
+
+      // 2. TUNGGU SAMPAI TRANSAKSI SELESAI (MINED)
+      if (publicClient) {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        
+        // Cek apakah transaksinya Revert/Gagal di level Smart Contract
+        if (receipt.status !== "success") {
+          throw new Error("Transaction reverted by the smart contract! Check gas or contract logic.");
+        }
+      }
+
+      // 3. Jika lolos sampai sini, berarti BENAR-BENAR BERHASIL
       setTxHash(hash);
       setStep("success");
     } catch(err:any) {

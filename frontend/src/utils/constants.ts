@@ -1,6 +1,6 @@
 export const CONTRACTS = {
-  BENEVOLENCE_VAULT: process.env.NEXT_PUBLIC_VAULT_ADDRESS  || "0x13f0b24F7E9246877d0De8925C884d72EBd57b5f",
-  REPUTATION_LEDGER: process.env.NEXT_PUBLIC_LEDGER_ADDRESS || "0x3130736739acfd207Cd8a9EDe4DeD1e9c006Eab0",
+  BENEVOLENCE_VAULT: process.env.NEXT_PUBLIC_VAULT_ADDRESS  || "0x74736ecAfdb001267f13Cd7314c512677B9cd465",
+  REPUTATION_LEDGER: process.env.NEXT_PUBLIC_LEDGER_ADDRESS || "0x5Dbac41e522FFa22e15Ba4EEFBae47571088236F",
   // GOOD_TOKEN dihapus — GOOD adalah native coin L1
 };
 
@@ -8,8 +8,8 @@ export const APEX_CHAIN = {
   id:       6969,
   name:     "APEXNETWORK",
   rpc:      process.env.NEXT_PUBLIC_RPC_URL ||
-            "http://127.0.0.1:9654/ext/bc/iPWmyj3eTRsSFUmivVcqc7y4xeeeWvLdw78YNLLGv1JGxUPYG/rpc",
-  symbol:   "GOOD",
+            "http://127.0.0.1:9654/ext/bc/2hGMsKi551C3hgc27H3ryiktbdJmbNxujbXZ7u1NprGLN7Aupi/rpc",
+  symbol:   "APEX",
   decimals: 18,
 } as const;
 

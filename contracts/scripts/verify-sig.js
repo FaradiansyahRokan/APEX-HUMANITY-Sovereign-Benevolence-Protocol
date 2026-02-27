@@ -1,13 +1,18 @@
 const { ethers } = require("hardhat");
+const fs = require("fs");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Deployer:", deployer.address);
 
-  const VAULT    = "0x13f0b24F7E9246877d0De8925C884d72EBd57b5f";
-  const LEDGER   = "0x3130736739acfd207Cd8a9EDe4DeD1e9c006Eab0";
-  const MINTER   = "0x0200000000000000000000000000000000000001";
-  const VOLUNTEER = "0x248183fF41154095Ac127C87429e79472e15A86c";
+  // 1. Baca otomatis dari file json hasil deploy terbaru
+  const deployed = JSON.parse(fs.readFileSync("./deployed-addresses.json", "utf8"));
+  const VAULT  = deployed.BenevolenceVault;
+  const LEDGER = deployed.ReputationLedger;
+
+  // 2. Variabel ini wajib ada (jangan sampai terhapus)
+  const MINTER = "0x0200000000000000000000000000000000000001";
+  const VOLUNTEER = deployer.address;
 
   // ── Test 1: NativeMinter ─────────────────────────────────────────────
   console.log("\n[1] Testing NativeMinter.mintNativeCoin...");
@@ -41,7 +46,7 @@ async function main() {
     ["function releaseReward(bytes32,address,address,uint256,uint256,bytes32,bytes32,string,uint256,uint8,bytes32,bytes32) external"],
     VAULT
   );
-  // Use dummy args just to see what error comes back
+  // Pakai dummy args untuk melihat apakah error yang dikembalikan sesuai (bukan BAD_DATA)
   try {
     await vault.releaseReward.staticCall(
       "0x00000000000000000000000000000000fac2e943fe9a43c7bb81432c3e2155cf",
