@@ -6,6 +6,9 @@ import { pad } from "viem";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS } from "../utils/constants";
 
+const ORACLE_URL = process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
+const ORACLE_KEY = process.env.NEXT_PUBLIC_SATIN_API_KEY || "apex-dev-key";
+
 type Step = "form" | "uploading" | "oracle" | "onchain" | "success";
 type CaptureMode = "camera" | "gallery" | null;
 
@@ -80,6 +83,38 @@ export default function SubmitImpactForm() {
   const { writeContractAsync } = useWriteContract();
   const busy = step !== "form";
   const stepIdx = STEPS.findIndex(s => s.key === step);
+
+  const [pendingReview, setPendingReview] = useState<boolean>(false);
+  const [checkingPending, setCheckingPending] = useState<boolean>(true);
+
+  // Check for existing pending community review
+  const checkPendingReview = async () => {
+    if (!address) {
+      setCheckingPending(false);
+      return;
+    }
+    setCheckingPending(true);
+    try {
+      const res = await fetch(`${ORACLE_URL}/api/v1/stream`, {
+        headers: { "X-APEX-Oracle-Key": ORACLE_KEY },
+      });
+      const data = await res.json();
+      const hasPending = data?.items?.some((item: any) =>
+        item.volunteer_address.toLowerCase() === address.toLowerCase() &&
+        item.needs_community_review &&
+        (!item.vote_info || item.vote_info.outcome === null)
+      ) || false;
+      setPendingReview(hasPending);
+    } catch (err) {
+      console.error("Failed to check stream", err);
+    } finally {
+      setCheckingPending(false);
+    }
+  };
+
+  useEffect(() => {
+    checkPendingReview();
+  }, [address]);
 
   // ── Camera helpers ────────────────────────────────────────────────────────
   const stopCamera = () => {
@@ -212,6 +247,15 @@ export default function SubmitImpactForm() {
       setOracle(real);
 
       setStep("onchain");
+      // ── Community review: skip contract call ────────────────────────────────
+      if (real.needs_community_review) {
+        setTxHash("");          // no on-chain tx
+        setStep("success");
+        stopCamera();
+        return;
+      }
+
+      // ── Normal flow: submit on-chain ─────────────────────────────────────────
       const ca = real.contract_args;
       if (!address || !CONTRACTS.BENEVOLENCE_VAULT) throw new Error("Wallet not connected");
 
@@ -241,38 +285,51 @@ export default function SubmitImpactForm() {
       setTxHash(hash);
       setStep("success");
       stopCamera();
+
     } catch (err: any) {
       setError(err.message || "Transaction failed");
       setStep("form");
+      checkPendingReview();
     }
   };
 
   /* ── Success screen ── */
+  const isCommunityReview = step === "success" && !txHash;
   if (step === "success") return (
     <div style={{ maxWidth: "480px" }}>
       <div style={{ ...glassCard, position: "relative" }}>
-        <div style={{ height: "2px", background: "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59,#ff6eb4)" }} />
+        <div style={{
+          height: "2px", background: isCommunityReview
+            ? "linear-gradient(90deg,#ffbd59,#ff6eb4)"
+            : "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59,#ff6eb4)"
+        }} />
         {/* Glow */}
         <div style={{
           position: "absolute", top: "-40px", left: "50%", transform: "translateX(-50%)",
           width: "200px", height: "200px", borderRadius: "50%",
-          background: "radial-gradient(circle,rgba(0,223,178,0.1) 0%,transparent 70%)",
+          background: isCommunityReview
+            ? "radial-gradient(circle,rgba(255,189,89,0.12) 0%,transparent 70%)"
+            : "radial-gradient(circle,rgba(0,223,178,0.1) 0%,transparent 70%)",
           pointerEvents: "none",
         }} />
         <div style={{ padding: "40px 36px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "22px", position: "relative" }}>
           <div style={{
             width: "60px", height: "60px", borderRadius: "18px",
-            background: "rgba(0,223,178,0.1)", border: "1px solid rgba(0,223,178,0.2)",
+            background: isCommunityReview ? "rgba(255,189,89,0.1)" : "rgba(0,223,178,0.1)",
+            border: `1px solid ${isCommunityReview ? "rgba(255,189,89,0.25)" : "rgba(0,223,178,0.2)"}`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "26px", boxShadow: "0 0 30px rgba(0,223,178,0.2)",
-          }}>✅</div>
+            fontSize: "26px",
+            boxShadow: isCommunityReview ? "0 0 30px rgba(255,189,89,0.2)" : "0 0 30px rgba(0,223,178,0.2)",
+          }}>{isCommunityReview ? "⏳" : "✅"}</div>
 
           <div>
             <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff", marginBottom: "8px" }}>
-              Impact Verified!
+              {isCommunityReview ? "Menunggu Verifikasi Komunitas" : "Impact Verified!"}
             </p>
             <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
-              Your action was verified by AI and recorded on the Reputation Ledger.
+              {isCommunityReview
+                ? "AI SATIN ragu dengan foto ini. Submission kamu sudah masuk ke Community Stream untuk divoting komunitas. Cek tab 🔴 Community Stream untuk melihat progresnya."
+                : "Your action was verified by AI and recorded on the Reputation Ledger."}
             </p>
           </div>
 
@@ -320,7 +377,7 @@ export default function SubmitImpactForm() {
           )}
 
           <button
-            onClick={() => { setStep("form"); setFile(null); setOracle(null); setTxHash(""); setCaptureMode(null); setCaptureTimestamp(null); }}
+            onClick={() => { setStep("form"); setFile(null); setOracle(null); setTxHash(""); setCaptureMode(null); setCaptureTimestamp(null); checkPendingReview(); }}
             style={{
               width: "100%", padding: "14px", borderRadius: "12px", border: "none",
               background: "linear-gradient(135deg,#00dfb2,#7c6aff)",
@@ -402,6 +459,38 @@ export default function SubmitImpactForm() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+  /* ── Pending Review screen ── */
+  if (checkingPending) return (
+    <div style={{ maxWidth: "480px", color: "rgba(255,255,255,0.4)", textAlign: "center", padding: "40px 0", fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
+      Checking status...
+    </div>
+  );
+
+  if (pendingReview) return (
+    <div style={{ maxWidth: "480px" }}>
+      <div style={{ ...glassCard, position: "relative" }}>
+        <div style={{ height: "2px", background: "linear-gradient(90deg,#ffbd59,#ff6eb4)" }} />
+        <div style={{ padding: "40px 36px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "22px" }}>
+          <div style={{
+            width: "60px", height: "60px", borderRadius: "18px",
+            background: "rgba(255,189,89,0.1)",
+            border: "1px solid rgba(255,189,89,0.25)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "26px",
+            boxShadow: "0 0 30px rgba(255,189,89,0.2)",
+          }}>⏳</div>
+          <div>
+            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff", marginBottom: "8px" }}>
+              Submission Sedang Divoting
+            </p>
+            <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
+              Kamu masih memiliki submission yang berstatus <b>Pending Community Review</b>. Silakan tunggu hingga hasil voting selesai (dan klaim reward jika disetujui) sebelum mengirimkan submission baru.
+            </p>
           </div>
         </div>
       </div>
@@ -685,7 +774,7 @@ export default function SubmitImpactForm() {
                     {captureMode === "camera" ? "Bonus autentisitas aktif" : "Skor dikurangi 15%"}
                   </p>
                 </div>
-                <button type="button" onClick={() => { setFile(null); setCaptureMode(null); setChallenge(null); }}
+                <button type="button" onClick={() => { setFile(null); setCaptureMode(null) }}
                   style={{
                     padding: "5px 10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)",
                     background: "transparent", color: "rgba(255,255,255,0.3)",

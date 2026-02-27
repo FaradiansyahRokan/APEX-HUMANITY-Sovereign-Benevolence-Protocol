@@ -555,12 +555,10 @@ class ImpactEvaluator:
                 f"[{metadata.event_id}] Poverty index updated from GPS: {metadata.poverty_index}"
             )
 
-        # ── Step 2: Computer Vision ─────────────────────────────────────
-        # FIX: CV verifier is ONLY called when image_bytes is provided.
         # Text/GPS-only submissions default to ai_confidence = 1.0 — they
         # are considered valid without image evidence; an image can only
         # boost the score, never penalise its absence.
-        # ai_confidence = 1.0
+        ai_confidence = 1.0
 
         if image_bytes:
             cv_result      = self.cv_verifier.verify_image_from_bytes(image_bytes)
@@ -584,6 +582,7 @@ class ImpactEvaluator:
                 f"[{metadata.event_id}] No image provided — "
                 f"text/GPS-only submission (ai_confidence=1.0)"
             )
+
 
         metadata.ai_confidence = ai_confidence
 
