@@ -12,8 +12,9 @@ import Leaderboard       from "@/components/Leaderboard";
 import VaultStats        from "@/components/VaultStats";
 import ImpactFeed        from "@/components/Impactfeed";
 import Badges            from "@/components/Badges";
+import P2PTransfer       from "@/components/P2ptransfer";
 
-type TabId = "submit"|"profile"|"feed"|"badges"|"leaderboard";
+type TabId = "submit"|"profile"|"feed"|"badges"|"leaderboard"|"transfer";
 
 const TABS: { id: TabId; label: string; color: string }[] = [
   { id:"submit",      label:"Submit Proof",  color:"var(--mi)" },
@@ -21,6 +22,7 @@ const TABS: { id: TabId; label: string; color: string }[] = [
   { id:"feed",        label:"Impact Feed",   color:"var(--mi)" },
   { id:"badges",      label:"Badges",        color:"var(--go)" },
   { id:"leaderboard", label:"Leaderboard",   color:"var(--vi)" },
+  { id:"transfer",    label:"P2P Transfer",  color:"var(--mi)" },
 ];
 
 /* ─── Hex chain background SVG ─── */
@@ -223,34 +225,7 @@ export default function Home() {
             you've changed — verified by AI, immortalized on-chain.
           </p>
 
-          {/* Mini stats row */}
-          <div className="rise rise-3" style={{
-            display:"flex", gap:"0",
-            borderRadius:"var(--r3)",
-            background:"var(--g1)", border:"1px solid var(--b0)",
-            overflow:"hidden",
-          }}>
-            {[
-              { val:"94,301", label:"Events Verified", color:"var(--mi)" },
-              { val:"12,847", label:"Volunteers",       color:"var(--vi)" },
-              { val:"8.2M",   label:"APEX Distributed", color:"var(--go)" },
-            ].map((s,i) => (
-              <div key={s.label} style={{
-                padding:"16px 28px",
-                borderLeft:i>0 ? "1px solid var(--b0)" : undefined,
-                textAlign:"center",
-              }}>
-                <p style={{
-                  fontFamily:"'JetBrains Mono',monospace",
-                  fontSize:"20px", fontWeight:600,
-                  color:s.color, letterSpacing:"-0.02em",
-                  lineHeight:1, marginBottom:"6px",
-                  textShadow:`0 0 20px ${s.color}40`,
-                }}>{s.val}</p>
-                <p className="label">{s.label}</p>
-              </div>
-            ))}
-          </div>
+         
         </div>
       </section>
 
@@ -343,6 +318,7 @@ export default function Home() {
             {tab==="feed"        && <ImpactFeed/>}
             {tab==="badges"      && <Badges address={address!}/>}
             {tab==="leaderboard" && <Leaderboard/>}
+            {tab==="transfer"    && <P2PTransfer address={address!}/>}
           </div>
         </div>
       ) : (

@@ -5,307 +5,324 @@ import { useReadContract } from "wagmi";
 import { REPUTATION_LEDGER_ABI } from "../utils/abis";
 import { CONTRACTS, getRank } from "../utils/constants";
 
-interface Entry { address:string; score:number; rank:number; }
+interface Entry { address: string; score: number; rank: number; }
 
-function SkeletonRow() {
-  return (
-    <div style={{
-      height:"52px",borderRadius:"var(--r2)",marginBottom:"6px",
-      background:"var(--g1)",border:"1px solid var(--b0)",
-      animation:"lbPulse 1.8s ease-in-out infinite",
-    }}/>
-  );
-}
-
-function Empty() {
-  return (
-    <div style={{padding:"80px 24px",textAlign:"center"}}>
-      <p style={{fontSize:"36px",opacity:0.08,marginBottom:"14px"}}>⛓️</p>
-      <p style={{fontSize:"14px",color:"var(--t1)",marginBottom:"5px"}}>No volunteers yet</p>
-      <p className="label">Submit your first impact proof</p>
-    </div>
-  );
-}
+const PODIUM_STYLES = [
+  // Silver (2nd)
+  { gradient: "linear-gradient(135deg,#9ab,#cde)", glow: "rgba(180,200,220,0.2)", bg: "rgba(180,200,220,0.05)", border: "rgba(180,200,220,0.15)", medal: "🥈", height: "70px" },
+  // Gold (1st)
+  { gradient: "linear-gradient(135deg,#ffbd59,#ff6eb4)", glow: "rgba(255,189,89,0.3)", bg: "rgba(255,189,89,0.07)", border: "rgba(255,189,89,0.25)", medal: "🥇", height: "88px" },
+  // Bronze (3rd)
+  { gradient: "linear-gradient(135deg,#d08040,#e09858)", glow: "rgba(210,140,80,0.2)", bg: "rgba(210,140,80,0.05)", border: "rgba(210,140,80,0.15)", medal: "🥉", height: "58px" },
+];
 
 export default function Leaderboard() {
-  const [filter,setFilter] = useState<"all"|"weekly"|"monthly">("all");
-  const [page,setPage]     = useState(0);
+  const [page, setPage] = useState(0);
   const PAGE = 10;
 
-  const { data:total } = useReadContract({
-    address:CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
-    abi:REPUTATION_LEDGER_ABI, functionName:"getLeaderboardLength",
+  const { data: total } = useReadContract({
+    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
+    abi: REPUTATION_LEDGER_ABI,
+    functionName: "getLeaderboardLength",
+    query: { refetchInterval: 10_000 },
   });
-  const { data:pageData,isLoading } = useReadContract({
-    address:CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
-    abi:REPUTATION_LEDGER_ABI, functionName:"getLeaderboardPage",
-    args:[BigInt(page*PAGE),BigInt(PAGE)],
-    query:{refetchInterval:10_000},
+  const { data: pageData, isLoading } = useReadContract({
+    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
+    abi: REPUTATION_LEDGER_ABI,
+    functionName: "getLeaderboardPage",
+    args: [BigInt(page * PAGE), BigInt(PAGE)],
+    query: { refetchInterval: 10_000 },
   });
-  const { data:globalStats } = useReadContract({
-    address:CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
-    abi:REPUTATION_LEDGER_ABI, functionName:"getGlobalStats",
-    query:{refetchInterval:10_000},
+  const { data: globalStats } = useReadContract({
+    address: CONTRACTS.REPUTATION_LEDGER as `0x${string}`,
+    abi: REPUTATION_LEDGER_ABI,
+    functionName: "getGlobalStats",
+    query: { refetchInterval: 10_000 },
   });
 
   const addrs  = (pageData as any)?.[0] ?? [];
   const scores = (pageData as any)?.[1] ?? [];
-  const totalN = Number(total??0);
-  const pages  = Math.ceil(totalN/PAGE);
+  const totalN = Number(total ?? 0);
+  const pages  = Math.ceil(totalN / PAGE);
 
-  const entries: Entry[] = addrs.map((a:string,i:number)=>({
-    address:a, score:Number(scores[i]??0n), rank:page*PAGE+i+1,
-  })).sort((a:Entry,b:Entry)=>b.score-a.score);
+  const entries: Entry[] = addrs.map((a: string, i: number) => ({
+    address: a, score: Number(scores[i] ?? 0n), rank: page * PAGE + i + 1,
+  })).sort((a: Entry, b: Entry) => b.score - a.score);
 
-  const top3 = entries.slice(0,3);
-
-  const podiumColors = [
-    { badge:"🥇", border:"var(--go-edge)",  bg:"linear-gradient(160deg,var(--go-dim),var(--g1))",  color:"var(--go)" },
-    { badge:"🥈", border:"var(--b1)",        bg:"var(--g1)",                                         color:"var(--t1)" },
-    { badge:"🥉", border:"var(--vi-edge)",   bg:"linear-gradient(160deg,var(--vi-deep),var(--g1))", color:"var(--vi)" },
-  ];
+  const podium = [entries[1], entries[0], entries[2]]; // silver, gold, bronze
 
   return (
-    <div style={{maxWidth:"780px"}}>
+    <div style={{ maxWidth: "800px" }}>
 
       {/* Header */}
       <div style={{
-        display:"flex",alignItems:"flex-end",
-        justifyContent:"space-between",
-        marginBottom:"28px",gap:"16px",flexWrap:"wrap",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: "28px", flexWrap: "wrap", gap: "12px",
       }}>
         <div>
-          <p className="label" style={{marginBottom:"8px",color:"var(--vi)"}}>Reputation Leaderboard</p>
-          <h2 className="title">
-            {totalN>0
-              ? <>{totalN.toLocaleString()} <span style={{color:"var(--t2)",fontWeight:400,fontSize:"17px"}}>volunteers</span></>
+          <p style={{
+            fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em",
+            fontFamily: "'JetBrains Mono',monospace", fontWeight: 600,
+            background: "linear-gradient(90deg,#7c6aff,#ff6eb4)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+            marginBottom: "6px",
+          }}>Reputation Leaderboard</p>
+          <p style={{
+            fontFamily: "'Plus Jakarta Sans',sans-serif",
+            fontWeight: 800, fontSize: "22px", color: "#fff",
+          }}>
+            {totalN > 0
+              ? <>{totalN.toLocaleString()} <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400, fontSize: "16px" }}>volunteers ranked</span></>
               : "Global Rankings"
             }
-          </h2>
+          </p>
         </div>
-
-        {/* Filter pills */}
         <div style={{
-          display:"flex",gap:"4px",
-          padding:"4px",borderRadius:"var(--r2)",
-          background:"var(--g1)",border:"1px solid var(--b0)",
+          display: "flex", alignItems: "center", gap: "6px",
+          padding: "6px 13px", borderRadius: "99px",
+          background: "rgba(0,223,178,0.06)", border: "1px solid rgba(0,223,178,0.15)",
         }}>
-          {(["all","weekly","monthly"] as const).map(f=>(
-            <button key={f} onClick={()=>setFilter(f)} style={{
-              padding:"7px 16px",borderRadius:"var(--r1)",
-              background: filter===f ? "var(--g2)" : "transparent",
-              border: filter===f ? "1px solid var(--b1)" : "1px solid transparent",
-              fontFamily:"'Plus Jakarta Sans',sans-serif",
-              fontSize:"12px",fontWeight:filter===f?700:400,
-              color:filter===f?"var(--t0)":"var(--t2)",
-              cursor:"pointer",transition:"all 0.15s",
-            }}>
-              {f==="all"?"All Time":f==="weekly"?"7 Days":"30 Days"}
-            </button>
-          ))}
+          <div style={{
+            width: "6px", height: "6px", borderRadius: "50%",
+            background: "#00dfb2", boxShadow: "0 0 8px #00dfb2",
+            animation: "pulse 2s ease-in-out infinite",
+          }} />
+          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "9px", fontWeight: 700, color: "#00dfb2", letterSpacing: "0.14em" }}>LIVE · 10s</span>
         </div>
       </div>
 
       {/* Global stats */}
       {globalStats && (
-        <div style={{
-          display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"24px",
-        }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "24px" }}>
           {[
-            {
-              label:"Total Volunteers", icon:"🧑‍🤝‍🧑",
-              value:Number((globalStats as any)[0]).toLocaleString(),
-              color:"var(--vi)",dim:"var(--vi-dim)",edge:"var(--vi-edge)",
-            },
-            {
-              label:"Total Impact Generated", icon:"💫",
-              value:(Number((globalStats as any)[1])/100).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}),
-              color:"var(--mi)",dim:"var(--mi-dim)",edge:"var(--mi-edge)",
-            },
-          ].map(s=>(
+            { label: "Total Volunteers",      value: Number((globalStats as any)[0]).toLocaleString(),     gradient: "linear-gradient(135deg,#7c6aff,#ff6eb4)" },
+            { label: "Total Impact Generated", value: (Number((globalStats as any)[1]) / 100).toLocaleString("en-US", { maximumFractionDigits: 0 }), gradient: "linear-gradient(135deg,#00dfb2,#7c6aff)" },
+          ].map(s => (
             <div key={s.label} style={{
-              padding:"18px 20px",borderRadius:"var(--r3)",
-              background:`linear-gradient(160deg,${s.dim} 0%,var(--g1) 60%)`,
-              border:`1px solid ${s.edge}`,
+              padding: "16px 20px", borderRadius: "14px",
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              position: "relative", overflow: "hidden",
             }}>
-              <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"12px"}}>
-                <span style={{fontSize:"14px"}}>{s.icon}</span>
-                <p className="label" style={{color:s.color,opacity:0.75}}>{s.label}</p>
-              </div>
+              <div style={{ position: "absolute", inset: 0, opacity: 0.05, background: s.gradient }} />
+              <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.3)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.07em" }}>{s.label}</p>
               <p style={{
-                fontFamily:"'JetBrains Mono',monospace",fontSize:"26px",fontWeight:600,
-                color:s.color,letterSpacing:"-0.02em",lineHeight:1,
-                textShadow:`0 0 20px ${s.color}40`,
+                fontFamily: "'JetBrains Mono',monospace", fontSize: "22px", fontWeight: 700,
+                background: s.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
               }}>{s.value}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* Skeleton */}
-      {isLoading && [...Array(5)].map((_,i)=><SkeletonRow key={i}/>)}
+      {/* Loading skeleton */}
+      {isLoading && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {[...Array(5)].map((_, i) => (
+            <div key={i} style={{
+              height: "52px", borderRadius: "12px",
+              background: `rgba(255,255,255,${0.025 - i * 0.004})`,
+              border: "1px solid rgba(255,255,255,0.04)",
+            }} />
+          ))}
+        </div>
+      )}
 
       {/* Empty */}
-      {!isLoading && entries.length===0 && <Empty/>}
+      {!isLoading && entries.length === 0 && (
+        <div style={{
+          padding: "80px 24px", textAlign: "center",
+          borderRadius: "16px", border: "1px solid rgba(255,255,255,0.05)",
+          background: "rgba(255,255,255,0.02)",
+        }}>
+          <p style={{ fontSize: "36px", opacity: 0.06, marginBottom: "14px" }}>⛓️</p>
+          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.35)", marginBottom: "5px" }}>No volunteers yet</p>
+          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.2)" }}>Submit your first impact proof</p>
+        </div>
+      )}
 
       {/* Podium — page 0 with 3+ entries */}
-      {!isLoading && top3.length>=3 && page===0 && (
-        <div style={{
-          display:"grid",gridTemplateColumns:"1fr 1.1fr 1fr",
-          gap:"8px",marginBottom:"14px",
-        }}>
-          {[top3[1],top3[0],top3[2]].map((e,i)=>{
-            // Render order: silver(2nd), gold(1st), bronze(3rd)
-            const realRank = i===0?2:i===1?1:3;
-            const pd = podiumColors[realRank-1];
-            const rep = getRank(e.score/100);
-            const isCenter = realRank===1;
-            return (
-              <div key={e.address} style={{
-                padding: isCenter?"22px 16px":"18px 14px",
-                borderRadius:"var(--r3)",
-                background:pd.bg,
-                border:`1px solid ${pd.border}`,
-                display:"flex",flexDirection:"column",
-                alignItems:"center",textAlign:"center",gap:"8px",
-                boxShadow: isCenter ? `0 0 32px var(--go-glow)` : "none",
-                transform: isCenter ? "translateY(-6px)" : "none",
-                transition:"transform 0.2s",
-              }}>
-                <span style={{fontSize:isCenter?"26px":"22px",lineHeight:1}}>{pd.badge}</span>
-                <div>
-                  <p style={{
-                    fontFamily:"'Plus Jakarta Sans',sans-serif",
-                    fontSize:"11px",fontWeight:700,color:pd.color,marginBottom:"3px",
-                  }}>{rep.icon} {rep.rank}</p>
-                  <p className="label">{e.address.slice(0,6)}…{e.address.slice(-4)}</p>
-                </div>
-                <p style={{
-                  fontFamily:"'JetBrains Mono',monospace",
-                  fontSize:isCenter?"20px":"16px",fontWeight:600,
-                  color:pd.color,letterSpacing:"-0.02em",
-                  textShadow:`0 0 16px ${pd.color}50`,
+      {!isLoading && entries.length >= 3 && page === 0 && (
+        <div style={{ marginBottom: "16px" }}>
+          {/* Podium bars base */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.15fr 1fr", gap: "8px", alignItems: "end" }}>
+            {[
+              { entry: podium[0], sIdx: 0 },
+              { entry: podium[1], sIdx: 1 },
+              { entry: podium[2], sIdx: 2 },
+            ].map(({ entry, sIdx }) => {
+              if (!entry) return null;
+              const s   = PODIUM_STYLES[sIdx];
+              const rep = getRank(entry.score / 100);
+              const isCenter = sIdx === 1;
+              return (
+                <div key={entry.address} style={{
+                  padding: isCenter ? "22px 16px" : "18px 14px",
+                  borderRadius: "16px",
+                  background: s.bg,
+                  border: `1px solid ${s.border}`,
+                  display: "flex", flexDirection: "column",
+                  alignItems: "center", textAlign: "center", gap: "9px",
+                  position: "relative", overflow: "hidden",
+                  transform: isCenter ? "translateY(-6px)" : "none",
+                  boxShadow: isCenter ? `0 8px 40px ${s.glow}` : "none",
                 }}>
-                  {(e.score/100).toLocaleString("en-US",{maximumFractionDigits:2})}
-                </p>
-              </div>
-            );
-          })}
+                  {isCenter && (
+                    <div style={{
+                      position: "absolute", top: "-30px", left: "50%", transform: "translateX(-50%)",
+                      width: "120px", height: "120px", borderRadius: "50%",
+                      background: s.glow, filter: "blur(30px)",
+                      pointerEvents: "none",
+                    }} />
+                  )}
+                  <span style={{ fontSize: isCenter ? "28px" : "22px", position: "relative" }}>{s.medal}</span>
+                  <div style={{ position: "relative" }}>
+                    <p style={{
+                      fontSize: "12px", fontWeight: 700,
+                      background: s.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                      marginBottom: "3px",
+                    }}>{rep.icon} {rep.rank}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "10px", color: "rgba(255,255,255,0.35)" }}>
+                      {entry.address.slice(0, 6)}…{entry.address.slice(-4)}
+                    </p>
+                  </div>
+                  <p style={{
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: isCenter ? "18px" : "14px", fontWeight: 700,
+                    background: s.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                    position: "relative",
+                  }}>
+                    {(entry.score / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Table */}
-      {!isLoading && entries.length>0 && (
+      {!isLoading && entries.length > 0 && (
         <div style={{
-          borderRadius:"var(--r3)",overflow:"hidden",
-          border:"1px solid var(--b0)",background:"var(--g0)",
+          borderRadius: "16px",
+          border: "1px solid rgba(255,255,255,0.06)",
+          background: "rgba(255,255,255,0.02)",
+          overflow: "hidden",
         }}>
+          {/* Rainbow top */}
+          <div style={{ height: "1px", background: "linear-gradient(90deg,#7c6aff,#ff6eb4,#ffbd59,transparent)" }} />
+
           {/* Header */}
           <div style={{
-            display:"grid",gridTemplateColumns:"52px 1fr 120px 110px",
-            padding:"12px 20px",borderBottom:"1px solid var(--b0)",
-            background:"var(--g1)",
+            display: "grid", gridTemplateColumns: "52px 1fr 120px 110px",
+            padding: "11px 18px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            background: "rgba(255,255,255,0.02)",
           }}>
-            {["#","VOLUNTEER","TIER","SCORE"].map((h,i)=>(
-              <p key={h} className="label" style={{textAlign:i===3?"right":"left"}}>{h}</p>
+            {["RANK", "VOLUNTEER", "TIER", "SCORE"].map((h, i) => (
+              <p key={h} style={{
+                fontSize: "9px", fontWeight: 700,
+                color: "rgba(255,255,255,0.25)", letterSpacing: "0.12em",
+                textAlign: i === 3 ? "right" : "left",
+                fontFamily: "'JetBrains Mono',monospace",
+              }}>{h}</p>
             ))}
           </div>
 
           {/* Rows */}
-          {entries.map((e,i)=>{
-            const rep    = getRank(e.score/100);
-            const medals = ["🥇","🥈","🥉"];
-            const isTop  = e.rank<=3;
-            const rowColor = e.rank===1?"var(--go)":e.rank===2?"var(--t1)":e.rank===3?"var(--vi)":"var(--t1)";
+          {entries.map((e, i) => {
+            const rep    = getRank(e.score / 100);
+            const medals = ["🥇", "🥈", "🥉"];
+            const isTop  = e.rank <= 3;
+            const scoreGrad = e.rank === 1
+              ? "linear-gradient(135deg,#ffbd59,#ff6eb4)"
+              : e.rank <= 3
+              ? "linear-gradient(135deg,#00dfb2,#7c6aff)"
+              : "none";
             return (
               <div key={e.address}
                 style={{
-                  display:"grid",gridTemplateColumns:"52px 1fr 120px 110px",
-                  padding:"13px 20px",alignItems:"center",
-                  borderBottom: i<entries.length-1?"1px solid var(--b0)":undefined,
-                  transition:"background 0.12s",
+                  display: "grid", gridTemplateColumns: "52px 1fr 120px 110px",
+                  padding: "12px 18px", alignItems: "center",
+                  borderBottom: i < entries.length - 1 ? "1px solid rgba(255,255,255,0.04)" : undefined,
+                  transition: "background 0.12s",
+                  position: "relative",
                 }}
-                onMouseEnter={ev=>(ev.currentTarget as HTMLDivElement).style.background="var(--g1)"}
-                onMouseLeave={ev=>(ev.currentTarget as HTMLDivElement).style.background="transparent"}
+                onMouseEnter={ev => (ev.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.025)"}
+                onMouseLeave={ev => (ev.currentTarget as HTMLDivElement).style.background = "transparent"}
               >
-                {/* Rank */}
+                {/* Rank number / medal */}
                 <p style={{
-                  fontFamily:"'JetBrains Mono',monospace",
-                  fontSize:"13px",fontWeight:700,
-                  color:rowColor,
-                }}>{isTop?medals[e.rank-1]:`#${e.rank}`}</p>
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: isTop ? "16px" : "13px", fontWeight: 700,
+                  color: "rgba(255,255,255,0.3)",
+                }}>{isTop ? medals[e.rank - 1] : `#${e.rank}`}</p>
 
-                {/* Address */}
                 <p style={{
-                  fontFamily:"'JetBrains Mono',monospace",
-                  fontSize:"12px",color:"var(--t1)",letterSpacing:"0.02em",
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: "12px", color: "rgba(255,255,255,0.6)",
+                }}>{e.address.slice(0, 10)}…{e.address.slice(-6)}</p>
+
+                <span style={{
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: "10px", fontWeight: 600,
+                  padding: "3px 9px", borderRadius: "6px",
+                  background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+                  color: "rgba(255,255,255,0.5)", display: "inline-block",
+                }}>{rep.icon} {rep.rank}</span>
+
+                <p style={{
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: "14px", fontWeight: 800,
+                  textAlign: "right",
+                  background: scoreGrad !== "none" ? scoreGrad : "none",
+                  WebkitBackgroundClip: scoreGrad !== "none" ? "text" : undefined,
+                  WebkitTextFillColor: scoreGrad !== "none" ? "transparent" : undefined,
+                  color: scoreGrad === "none" ? "rgba(255,255,255,0.7)" : "transparent",
                 }}>
-                  {e.address.slice(0,8)}…{e.address.slice(-6)}
-                </p>
-
-                {/* Tier */}
-                <div>
-                  <span style={{
-                    fontFamily:"'JetBrains Mono',monospace",
-                    fontSize:"10px",fontWeight:500,
-                    padding:"3px 9px",borderRadius:"5px",
-                    background:"var(--g1)",border:"1px solid var(--b0)",
-                    color:"var(--t1)",
-                  }}>
-                    {rep.icon} {rep.rank}
-                  </span>
-                </div>
-
-                {/* Score */}
-                <p style={{
-                  fontFamily:"'JetBrains Mono',monospace",
-                  fontSize:"13px",fontWeight:700,textAlign:"right",
-                  color: e.rank===1?"var(--go)":e.rank<=3?"var(--mi)":"var(--t0)",
-                  textShadow: e.rank<=3?`0 0 12px ${e.rank===1?"var(--go-glow)":"var(--mi-glow)"}`:undefined,
-                  letterSpacing:"-0.01em",
-                }}>
-                  {(e.score/100).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}
+                  {(e.score / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </p>
               </div>
             );
           })}
 
           {/* Pagination */}
-          {pages>1 && (
+          {pages > 1 && (
             <div style={{
-              display:"flex",alignItems:"center",justifyContent:"space-between",
-              padding:"12px 20px",borderTop:"1px solid var(--b0)",
-              background:"var(--g1)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "12px 18px",
+              borderTop: "1px solid rgba(255,255,255,0.05)",
+              background: "rgba(255,255,255,0.02)",
             }}>
-              <p className="label">{page+1} / {pages} · {totalN} entries</p>
-              <div style={{display:"flex",gap:"6px"}}>
+              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.25)", fontFamily: "'JetBrains Mono',monospace" }}>
+                {page + 1} / {pages} · {totalN} entries
+              </p>
+              <div style={{ display: "flex", gap: "8px" }}>
                 {[
-                  {label:"← Prev",dis:page===0,      fn:()=>setPage(p=>p-1)},
-                  {label:"Next →",dis:page>=pages-1, fn:()=>setPage(p=>p+1)},
-                ].map(b=>(
-                  <button key={b.label} onClick={b.fn} disabled={b.dis} className="btn-ghost"
-                    style={{padding:"6px 14px",fontSize:"12px",opacity:b.dis?0.4:1,cursor:b.dis?"not-allowed":"pointer"}}>
+                  { label: "← Prev", dis: page === 0,           fn: () => setPage(p => p - 1) },
+                  { label: "Next →", dis: page >= pages - 1,    fn: () => setPage(p => p + 1) },
+                ].map(b => (
+                  <button key={b.label} onClick={b.fn} disabled={b.dis}
+                    style={{
+                      padding: "6px 14px", borderRadius: "8px",
+                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                      fontFamily: "'Plus Jakarta Sans',sans-serif",
+                      fontSize: "11px", color: "rgba(255,255,255,0.5)",
+                      opacity: b.dis ? 0.3 : 1, cursor: b.dis ? "not-allowed" : "pointer",
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={e => { if (!b.dis) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.04)"; }}>
                     {b.label}
                   </button>
                 ))}
               </div>
             </div>
           )}
-
-          {/* Footer live indicator */}
-          <div style={{
-            display:"flex",alignItems:"center",gap:"7px",
-            padding:"9px 20px",borderTop:"1px solid var(--b0)",
-          }}>
-            <span className="dot dot-mi" style={{width:"4px",height:"4px"}}/>
-            <p className="label">Live on-chain · refreshes every 10s</p>
-          </div>
         </div>
       )}
 
-      <style>{`
-        @keyframes lbPulse { 0%,100%{opacity:0.4}50%{opacity:0.8} }
-      `}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.7)}}`}</style>
     </div>
   );
 }
