@@ -34,9 +34,9 @@ logger = logging.getLogger("satin.fraud")
 PHASH_THRESHOLD      = int(os.getenv("FRAUD_PHASH_THRESHOLD", "10"))
 RATE_WINDOW_SEC      = int(os.getenv("FRAUD_RATE_WINDOW_SEC", "3600"))
 MAX_SUBMITS_WINDOW   = int(os.getenv("FRAUD_MAX_SUBMITS_HOUR", "5"))
-EXIF_MAX_AGE_HOURS   = int(os.getenv("FRAUD_EXIF_MAX_AGE_HOURS", "48"))  # foto > 48h lalu = penalty
-GPS_MISMATCH_KM      = float(os.getenv("FRAUD_GPS_MISMATCH_KM", "50"))   # jarak > 50km = suspicious
-ELA_THRESHOLD        = float(os.getenv("FRAUD_ELA_THRESHOLD", "35.0"))   # mean ELA > 35 = edited
+EXIF_MAX_AGE_HOURS   = int(os.getenv("FRAUD_EXIF_MAX_AGE_HOURS", "72"))  # 3 hari
+GPS_MISMATCH_KM      = float(os.getenv("FRAUD_GPS_MISMATCH_KM", "100"))  # jarak > 100km
+ELA_THRESHOLD        = float(os.getenv("FRAUD_ELA_THRESHOLD", "45.0"))   # mean ELA > 45 = edited
 
 
 # ── Persistent Stores (Redis) ──────────────────────────────────────────────────
@@ -161,7 +161,7 @@ def _run_ela(image_bytes: bytes, quality: int = 75) -> dict:
         mean_ela = float(arr.mean())
         max_ela  = float(arr.max())
 
-        if mean_ela < 15:
+        if mean_ela < 20:
             verdict = "authentic"
         elif mean_ela < ELA_THRESHOLD:
             verdict = "possibly_edited"
@@ -324,12 +324,12 @@ class FraudDetector:
         exif = _extract_exif(image_bytes)
         is_high_risk = False
 
-        # No EXIF at all — likely screenshot, AI-gen, or WhatsApp-recompressed
+        # No EXIF at all — often happens via WhatsApp sharing or Gallery screenshot
         if not exif["has_exif"]:
             warnings.append("no_exif_metadata")
-            penalty += 0.15  # 15% authenticity penalty
-            is_high_risk = True
-            logger.info("[EXIF] No EXIF found — possible AI/screenshot image -> HIGH RISK")
+            penalty += 0.10  # Raised from 5% to 10% (was originally 15%)
+            is_high_risk = False 
+            logger.info("[EXIF] No EXIF found — applying moderate penalty")
         else:
             # Timestamp check
             dt_str = exif.get("datetime_original")
@@ -340,8 +340,8 @@ class FraudDetector:
                     age_hours = (datetime.datetime.now() - dt).total_seconds() / 3600
                     if age_hours > EXIF_MAX_AGE_HOURS:
                         warnings.append(f"photo_too_old_{int(age_hours)}h")
-                        # Graduated penalty: 48h-168h = 15%, >168h (1 week) = 30%
-                        penalty += 0.30 if age_hours > 168 else 0.15
+                        # Graduated penalty: moderate
+                        penalty += 0.25 if age_hours > 168 else 0.15
                         if age_hours > 168:
                             is_high_risk = True
                         logger.warning(f"[EXIF] Photo age: {age_hours:.1f}h (limit: {EXIF_MAX_AGE_HOURS}h)")
@@ -355,7 +355,7 @@ class FraudDetector:
                 dist_km = _haversine_km(exif_lat, exif_lon, submit_lat, submit_lon)
                 if dist_km > GPS_MISMATCH_KM:
                     warnings.append(f"gps_mismatch_{dist_km:.0f}km")
-                    penalty += 0.25
+                    penalty += 0.20 # Raised from 15% (was originally 25%)
                     logger.warning(
                         f"[EXIF] GPS mismatch: photo at ({exif_lat:.4f},{exif_lon:.4f}) "
                         f"vs submit at ({submit_lat:.4f},{submit_lon:.4f}) — {dist_km:.1f}km apart"
@@ -363,13 +363,13 @@ class FraudDetector:
 
         # Live capture bonus: reduce penalty if from in-app camera
         if source == "live_capture":
-            penalty = max(0.0, penalty - 0.10)
+            penalty = max(0.0, penalty - 0.10) # Reverted bonus to -10% and capped at 0
             logger.info("[EXIF] Live-capture bonus applied")
 
         return {
             "ok":                   True,   # EXIF issues → penalty only, not hard reject
             "warnings":             warnings,
-            "authenticity_penalty": round(min(penalty, 0.50), 2),  # cap at 50%
+            "authenticity_penalty": round(min(penalty, 0.45), 2),  # cap max penalty at 45% (was 50%, then 40%)
             "is_high_risk":         is_high_risk,
         }
 
@@ -385,9 +385,9 @@ class FraudDetector:
         ela    = result["ela_score"]
 
         if result["verdict"] == "suspicious":
-            penalty = 0.30
+            penalty = 0.25 # Raised from 20% (originally 30%)
         elif result["verdict"] == "possibly_edited":
-            penalty = 0.10
+            penalty = 0.10 # Reverted to 10%
         else:
             penalty = 0.0
 
@@ -459,6 +459,6 @@ class FraudDetector:
             "ok":                   True,
             "reason":               None,
             "warnings":             all_warnings,
-            "authenticity_penalty": round(min(total_penalty, 0.60), 2),  # max 60% penalty
+            "authenticity_penalty": round(min(total_penalty, 0.50), 2),  # max 50% penalty (was 60%, then 40%)
             "is_high_risk":         global_is_high_risk,
         }

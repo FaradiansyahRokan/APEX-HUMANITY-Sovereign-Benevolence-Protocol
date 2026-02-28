@@ -42,15 +42,13 @@ from typing import Any, Optional
 
 logger = logging.getLogger("satin.param_validator")
 
-# ── Anthropic API untuk LLM Cross-Validator ───────────────────────────────────
-try:
-    import anthropic as _anthropic_sdk
-    _ANTHROPIC_CLIENT = _anthropic_sdk.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
-    _LLM_AVAILABLE = bool(os.getenv("ANTHROPIC_API_KEY"))
-except ImportError:
-    _ANTHROPIC_CLIENT = None
-    _LLM_AVAILABLE = False
-    logger.warning("[ParamValidator] anthropic SDK not found — LLM layer disabled")
+# ── Ollama API untuk Local VLM Cross-Validator ───────────────────────────────────
+import requests
+import base64
+
+_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/generate"
+# Assume always available for this local integration
+_LLM_AVAILABLE = True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -174,7 +172,7 @@ ACTION_CONSTRAINTS: dict[str, dict] = {
     "ENVIRONMENTAL_ACTION": {
         "max_people_per_hour": 40,      # bersih-bersih: 40 orang terlibat per jam
         "max_effort_hours":    16,
-        "max_people_abs":      300,
+        "max_people_abs":      1000,
         "urgency_allowed":     ["LOW", "MEDIUM", "HIGH"],  # CRITICAL sangat jarang valid
         "require_any_keyword": [
             "lingkungan", "environment", "sampah", "trash", "garbage", "plastic",
@@ -225,7 +223,7 @@ class ValidationResult:
 
     def add_penalty(self, code: str, amount: float, reason: str):
         self.penalties.append({"code": code, "amount": amount, "reason": reason})
-        self.total_penalty = min(1.0, self.total_penalty + amount)
+        self.total_penalty = min(0.60, self.total_penalty + amount) # Cap total param penalty at 60%
         self.warnings.append(code)
         logger.warning(f"[ParamValidator] PENALTY +{amount:.0%} | {code}: {reason}")
 
@@ -262,7 +260,7 @@ class ParameterValidator:
     def __init__(self):
         self._llm_available = _LLM_AVAILABLE
         logger.info(
-            f"ParameterValidator initialized | LLM layer: {'ON' if self._llm_available else 'OFF (set ANTHROPIC_API_KEY)'}"
+            f"ParameterValidator initialized | Local VLM layer (Ollama): {'ON' if self._llm_available else 'OFF'}"
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -302,7 +300,7 @@ class ParameterValidator:
         if self._llm_available and description.strip():
             self._llm_cross_validate(
                 result, action_type, urgency_level,
-                effort_hours, people_helped, description
+                effort_hours, people_helped, description, image_bytes
             )
 
         # Auto-clamp adjusted values for downstream use
@@ -334,7 +332,7 @@ class ParameterValidator:
 
         if effort_hours > max_hours:
             overshoot_pct = (effort_hours - max_hours) / max_hours
-            penalty = min(0.35, 0.15 + overshoot_pct * 0.20)
+            penalty = min(0.25, 0.10 + overshoot_pct * 0.15) # Moderate effort penalty
             result.add_penalty(
                 "effort_hours_inflated",
                 penalty,
@@ -370,7 +368,7 @@ class ParameterValidator:
 
         if people_helped > max_abs:
             overshoot_pct = (people_helped - max_abs) / max_abs
-            penalty = min(0.40, 0.20 + overshoot_pct * 0.15)
+            penalty = min(0.30, 0.15 + overshoot_pct * 0.10) # Moderate inflated people penalty
             result.add_penalty(
                 "people_helped_inflated",
                 penalty,
@@ -400,7 +398,7 @@ class ParameterValidator:
 
         if actual_ratio > impossible_ratio:
             overshoot_pct = (actual_ratio - impossible_ratio) / impossible_ratio
-            penalty = min(0.40, 0.20 + overshoot_pct * 0.10)
+            penalty = min(0.25, 0.15 + overshoot_pct * 0.05) # Moderate ratio penalty
             result.add_penalty(
                 "effort_people_ratio_anomaly",
                 penalty,
@@ -481,7 +479,7 @@ class ParameterValidator:
         if not has_relevant_keyword:
             result.add_penalty(
                 "description_keyword_mismatch",
-                0.45,
+                0.25, # Moderate mismatch penalty
                 f"Description tidak mengandung kata kunci relevan untuk {action_type}. "
                 f"Contoh kata kunci yang diharapkan: {required_keywords[:5]}. "
                 f"Kemungkinan action_type dipilih secara tidak jujur."
@@ -495,7 +493,7 @@ class ParameterValidator:
         if cross_action_flags:
             result.add_penalty(
                 "description_action_mismatch",
-                0.35,
+                0.20, # Moderate cross mismatch penalty
                 f"Description lebih cocok untuk action: {', '.join(cross_action_flags)} "
                 f"daripada {action_type}. Kemungkinan action_type dipilih salah/sengaja dimanipulasi."
             )
@@ -535,7 +533,7 @@ class ParameterValidator:
         if person_count_yolo == 0 and people_helped > 5:
             result.add_penalty(
                 "no_people_visible_but_high_claimed",
-                0.30,
+                0.15, # Moderate no people penalty
                 f"YOLO tidak mendeteksi orang di foto, tapi people_helped={people_helped}. "
                 f"Foto tidak membuktikan keberadaan orang yang dibantu."
             )
@@ -545,10 +543,10 @@ class ParameterValidator:
         # Allowance: foto mungkin hanya capture sebagian orang
         # Rule: visible_count × 20 harus >= claimed (1 orang di foto bisa mewakili 20)
         if person_count_yolo > 0:
-            max_plausible = person_count_yolo * 25  # 25x tolerance
+            max_plausible = person_count_yolo * 30  # Moderate tolerance from 35x to 30x
             if people_helped > max_plausible and people_helped > 50:
                 ratio = people_helped / max(person_count_yolo, 1)
-                penalty = min(0.35, 0.10 + (ratio / 100) * 0.05)
+                penalty = min(0.25, 0.10 + (ratio / 100) * 0.05) # Moderate penalty
                 result.add_penalty(
                     "yolo_count_vs_claimed_mismatch",
                     penalty,
@@ -618,16 +616,18 @@ class ParameterValidator:
         effort_hours: float,
         people_helped: int,
         description:  str,
+        image_bytes:  Optional[bytes] = None,
     ):
         """
-        Gunakan Claude untuk membaca description dan menilai konsistensinya
-        dengan semua parameter lain.
-
+        Gunakan Ollama VLM (LLaVA) untuk membaca description, meilihat foto evidence, dan menilai konsistensinya.
+        
         Output: JSON verdict dengan skor 0-100 dan reasoning.
         """
         try:
-            prompt = f"""Kamu adalah sistem deteksi penipuan untuk platform filantropi blockchain.
-Seseorang mengklaim telah melakukan kegiatan sosial berikut:
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8') if image_bytes else None
+
+            prompt = f"""Kamu adalah sistem deteksi penipuan AI bernama SATIN Vanguard.
+Silakan lihat foto kejadian (jika dilampirkan) dan baca klaim kegiatan sosial berikut:
 
 ACTION_TYPE: {action_type}
 URGENCY: {urgency_level}
@@ -635,30 +635,35 @@ EFFORT_HOURS: {effort_hours}
 PEOPLE_HELPED: {people_helped}
 DESCRIPTION: "{description}"
 
-Tugasmu adalah mendeteksi apakah parameter yang diklaim KONSISTEN dengan deskripsi.
-Jawab HANYA dalam format JSON berikut, tidak ada teks lain:
+Tugas utama: Deteksi apakah parameter yang diklaim logis, konsisten satu sama lain, dan KONSISTEN DENGAN FOTO (jika ada).
+Jawab HANYA dalam format JSON tulen berikut, tidak boleh ada teks pengantar atau markdown block sama sekali:
 {{
   "verdict": "consistent" | "suspicious" | "fabricated",
-  "confidence": 0-100,
+  "confidence": <integer 0-100>,
   "inconsistencies": ["list", "of", "specific", "issues"],
   "manipulation_type": null | "action_type_mismatch" | "people_inflated" | "effort_inflated" | "urgency_gamed" | "description_vague" | "multiple",
   "realistic_people_helped": <integer estimate>,
   "realistic_effort_hours": <float estimate>,
-  "reasoning": "penjelasan singkat 1-2 kalimat"
+  "reasoning": "penjelasan logis"
 }}
 
-Contoh penipuan: "Membantu seorang nenek menyebrang jalan" tapi action=DISASTER_RELIEF, urgency=CRITICAL, people=500.
-Contoh jujur: "Distribusi 200 paket nasi bersama tim relawan selama 8 jam di camp pengungsi banjir" → FOOD_DISTRIBUTION, HIGH, 8h, 200.
+Contoh penipuan: "Bagi nasi 500 orang" tapi di foto cuma ada piring kotor kosong di meja.
+Contoh jujur: Fotonya ada banyak relawan distribusi paket ke masyarakat, sesuai dengan deskripsinya."""
 
-Perhatikan: manipulation_type harus diisi jika verdict bukan "consistent"."""
+            payload = {
+                "model": "llava",
+                "prompt": prompt,
+                "stream": False,
+                "format": "json"
+            }
+            if image_b64:
+                payload["images"] = [image_b64]
 
-            response = _ANTHROPIC_CLIENT.messages.create(
-                model="claude-haiku-4-5-20251001",   # Gunakan Haiku untuk efisiensi
-                max_tokens=400,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            logger.info("[LLM] Sending request to Ollama (llava)...")
+            response = requests.post(_OLLAMA_ENDPOINT, json=payload, timeout=45)
+            response.raise_for_status()
 
-            raw = response.content[0].text.strip()
+            raw = response.json().get("response", "").strip()
             # Clean JSON
             raw = re.sub(r"```json|```", "", raw).strip()
 

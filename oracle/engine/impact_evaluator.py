@@ -247,9 +247,9 @@ from ultralytics import YOLO
 
 class ComputerVisionVerifier:
     def __init__(self):
-        # YOLOv8 Nano — auto-downloaded on first run
-        self.model = YOLO("yolov8n.pt")
-        logger.info("YOLOv8 Model Loaded Successfully")
+        # YOLOv8 Medium — auto-downloaded on first run, much more precise for RTX 4050
+        self.model = YOLO("yolov8m.pt")
+        logger.info("YOLOv8 Medium Model Loaded Successfully (CUDA)")
 
     @staticmethod
     def _resize_image_bytes(image_bytes: bytes, max_dim: int = 1024, max_kb: int = 500) -> bytes:
@@ -658,8 +658,8 @@ class ImpactEvaluator:
 
         MIN_SCORE_THRESHOLD = 30.0
         reasons = []
-        if image_bytes and ai_confidence < 0.25:
-            reasons.append(f"Image verification confidence too low: {ai_confidence:.2%} (min 25%)")
+        if image_bytes and ai_confidence < 0.20:
+            reasons.append(f"Image verification confidence too low: {ai_confidence:.2%} (min 20%)")
         if impact_score < MIN_SCORE_THRESHOLD:
             reasons.append(f"Impact score {impact_score:.2f} below minimum threshold {MIN_SCORE_THRESHOLD} (scaled: {int(impact_score * 100)} < 3000 required by contract)")
         

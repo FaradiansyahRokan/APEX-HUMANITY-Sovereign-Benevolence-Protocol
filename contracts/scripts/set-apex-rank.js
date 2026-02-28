@@ -4,7 +4,7 @@ async function main() {
     const [admin] = await hre.ethers.getSigners();
 
     // Alamat Dompet yang mau di-cheat / diangkat pangkatnya jadi APEX
-    const targetAddress = "0x5Ff3fB480640e727E1B49304c4300c1949738079"; // <- Bisa diganti ke alamat MetaMask siapa pun
+    const targetAddress = "0x881C46B5eBd520E045CD932190fB2F055AdF81dF"; // <- Bisa diganti ke alamat MetaMask siapa pun
     const bonusScore = 1500000; // Skor minimal APEX adalah 10,000
 
     console.log("🔥 Menginisialisasi Jalur Belakang Admin...");
