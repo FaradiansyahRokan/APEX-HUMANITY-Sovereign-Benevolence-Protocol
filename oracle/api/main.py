@@ -2,24 +2,19 @@
 APEX HUMANITY — SATIN Oracle API Gateway
 FastAPI server exposing the ImpactEvaluator to the dApp and smart contracts.
 
-v1.3.0 — Parameter Integrity Update:
-  - ParameterValidator berlapis: hard cap, ratio anomaly, LLM cross-check
-  - YOLO person count triangulation vs claimed people_helped
-  - Description keyword cross-check per action type
-  - Urgency-ActionType compatibility matrix
-  - Auto-clamp adjusted parameters sebelum scoring
-  - Parameter manipulation auto-ban (3x streak)
+v2.0.0 — Autonomous AI Deduction (AAD) Architecture
+=====================================================
+PERUBAHAN FUNDAMENTAL:
+  - User TIDAK LAGI mengisi slider people_helped, effort_hours, action_type, urgency
+  - User hanya submit: foto + deskripsi bebas + GPS
+  - YOLOv8m + LLaVA yang MENYIMPULKAN semua parameter secara otomatis
+  - Reward TIDAK keluar jika total penalty > 0.60 (hard threshold)
+  - Reward dihitung dari AI-deduced score, bukan user-claimed score
+  - Zero loophole: tidak ada parameter yang bisa dimanipulasi user
 
-v1.2.0 — Data Integrity Update:
-  - GET /api/v1/challenge  — challenge nonce endpoint for photo verification
-  - EXIF validation passed to fraud_detector (timestamp + GPS mismatch)
-  - ELA analysis result surfaced in response as integrity_warnings
-  - source field in request (live_capture | gallery) — live gets bonus score
-
-v1.1.0 Changes:
-  - CORS allow_origins from ALLOWED_ORIGINS env var
-  - Rate limiting via slowapi
-  - GPSCoordinatesInput rename
+v1.3.0 — Parameter Integrity (deprecated, replaced by AAD)
+v1.2.0 — Data Integrity Update
+v1.1.0 — CORS, Rate limiting, GPSCoordinatesInput
 """
 
 import base64
@@ -45,8 +40,9 @@ CHAMPION_REPUTATION_THRESHOLD = 500
 VOTE_PHASE2_DELAY_SEC         = 600
 VOTE_QUORUM                   = 3
 
-# ── Parameter Manipulation Streak (beda dari general fraud) ──────────────────
-PARAM_MANIP_STREAK_BAN = 3   # 3x parameter manipulation → auto-ban
+# v2.0.0 — Hard reward gate: penalty > ini → reward = 0, tidak ada partial
+REWARD_GATE_MAX_PENALTY       = 0.60   # > 60% penalty → no reward at all
+PARAM_MANIP_STREAK_BAN        = 3
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,7 +63,7 @@ from engine.impact_evaluator import (
     EvaluationFailedError,
 )
 from engine.fraud_detector import FraudDetector
-from engine.parameter_validator import ParameterValidator
+from engine.parameter_validator import ParameterValidator, deduce_parameters_from_ai
 
 load_dotenv()
 
@@ -81,14 +77,14 @@ API_KEY_HEADER = APIKeyHeader(name="X-APEX-Oracle-Key", auto_error=True)
 RATE_LIMIT_VERIFY = os.getenv("RATE_LIMIT_VERIFY", "5/minute")
 limiter           = Limiter(key_func=get_remote_address)
 
-evaluator         = ImpactEvaluator(private_key_hex=os.getenv("ORACLE_PRIVATE_KEY"))
-fraud_detector    = FraudDetector()
-param_validator   = ParameterValidator()   # ← NEW: parameter integrity validator
+evaluator       = ImpactEvaluator(private_key_hex=os.getenv("ORACLE_PRIVATE_KEY"))
+fraud_detector  = FraudDetector()
+param_validator = ParameterValidator()
 
 app = FastAPI(
     title       = "APEX HUMANITY — SATIN Oracle API",
-    description = "AI Oracle for Proof of Beneficial Action (PoBA) verification",
-    version     = "1.3.0",
+    description = "AI Oracle for Proof of Beneficial Action (PoBA) — AAD v2.0",
+    version     = "2.0.0",
     docs_url    = "/docs",
     redoc_url   = "/redoc",
 )
@@ -105,22 +101,13 @@ async def _startup_validation():
     DEFAULT_KEY = "apex-dev-key-change-in-prod"
     warnings_found = []
     if not private_key:
-        warnings_found.append(
-            "NO ORACLE_PRIVATE_KEY SET — ephemeral key in use. Set before production."
-        )
+        warnings_found.append("NO ORACLE_PRIVATE_KEY SET — ephemeral key in use.")
     if not api_key_val or api_key_val == DEFAULT_KEY:
-        warnings_found.append(
-            f"DEFAULT API KEY IN USE. Set a strong ORACLE_API_KEY before production."
-        )
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        warnings_found.append(
-            "ANTHROPIC_API_KEY not set — LLM description cross-validator DISABLED. "
-            "Set to enable the most powerful anti-manipulation layer."
-        )
+        warnings_found.append("DEFAULT API KEY IN USE.")
     for w in warnings_found:
         log.critical(f"\n{'='*70}\n⚠️  SECURITY WARNING: {w}\n{'='*70}")
     if not warnings_found:
-        log.info("✅ Startup validation passed.")
+        log.info("✅ Startup validation passed — SATIN AAD v2.0.0 ready.")
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 _raw_origins    = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
@@ -139,7 +126,7 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     return api_key
 
 
-# ─── Request / Response Models ────────────────────────────────────────────────
+# ─── Request / Response Models (v2.0 — simplified input) ─────────────────────
 class GPSInput(BaseModel):
     latitude:        float
     longitude:       float
@@ -147,54 +134,52 @@ class GPSInput(BaseModel):
 
 
 class VerifyImpactRequest(BaseModel):
-    ipfs_cid:            str
-    evidence_type:       str           = "image"
-    hash_sha256:         str
+    """
+    v2.0.0 — Input sangat disederhanakan.
+    User HANYA mengisi: deskripsi bebas + GPS + foto.
+    TIDAK ADA: action_type, urgency_level, effort_hours, people_helped dari user.
+    Semua parameter tersebut DIDEDUCED oleh AI.
+    """
+    # Required
+    description:         str            # Deskripsi bebas, natural language
     gps:                 GPSInput
-    action_type:         ActionType
-    people_helped:       int
     volunteer_address:   str
     beneficiary_address: str
-    country_iso:         str           = "ID"
-    description:         Optional[str] = None
-    urgency_level:       str           = "HIGH"
-    effort_hours:        float         = 8.0
-    source:              str           = Field(default="gallery", description="'live_capture' | 'gallery'")
-    capture_timestamp:   Optional[int] = Field(default=None)
-    image_base64:        Optional[str] = Field(default=None)
+
+    # Photo evidence
+    image_base64:        Optional[str]  = Field(default=None)
+    hash_sha256:         str            = "0" * 64
+    ipfs_cid:            str            = "text-only"
+    evidence_type:       str            = "image"
+    source:              str            = Field(default="gallery", description="'live_capture' | 'gallery'")
+    capture_timestamp:   Optional[int]  = Field(default=None)
+    country_iso:         str            = "ID"
 
 
 class ImpactScoreResponse(BaseModel):
-    event_id:              str
-    status:                str
-    impact_score:          float
-    ai_confidence:         float
-    token_reward:          float
-    oracle_address:        str
-    zk_proof_hash:         str
-    event_hash:            str
-    nonce:                 str
-    issued_at:             int
-    expires_at:            int
-    score_breakdown:       Dict[str, float]
-    signature:             Dict[str, str]
-    contract_args:         Dict[str, Any]
-    processing_time_ms:    float
-    integrity_warnings:    List[str]
-    authenticity_penalty:  float
-    # v1.3.0 NEW
-    parameter_warnings:    List[str]
-    parameter_penalty:     float
-    adjusted_people_helped: Optional[int]
-    adjusted_effort_hours:  Optional[float]
-    llm_verdict:           Optional[str]
+    event_id:             str
+    status:               str
+    impact_score:         float
+    ai_confidence:        float
+    token_reward:         float
+    oracle_address:       str
+    zk_proof_hash:        str
+    event_hash:           str
+    nonce:                str
+    issued_at:            int
+    expires_at:           int
+    score_breakdown:      Dict[str, float]
+    signature:            Dict[str, str]
+    contract_args:        Dict[str, Any]
+    processing_time_ms:   float
+    integrity_warnings:   List[str]
+    authenticity_penalty: float
+    # v2.0 — AI deduced fields (shown to user for transparency)
+    ai_deduced:           Dict[str, Any]
+    needs_community_review: bool
 
 
-class BatchVerifyRequest(BaseModel):
-    events: List[VerifyImpactRequest] = Field(..., max_items=50)
-
-
-# ─── Helper: safe OraclePayload → dict ────────────────────────────────────────
+# ─── Helper: payload → dict ───────────────────────────────────────────────────
 def _payload_to_dict(payload: OraclePayload) -> dict:
     return {
         "event_id":        payload.event_id,
@@ -267,21 +252,16 @@ def _build_community_claim_payload(stream_entry: dict) -> tuple[dict, dict]:
         "tokenRewardWei":     str(token_reward_wei),
         "beneficiaryAddress": volunteer_addr,
     }
-    log.info(f"[CLAIM] Community payload built for {event_id}: score={impact_score}, reward={token_reward} APEX")
     return payload_dict, contract_args
 
 
-# ─── Parameter Manipulation Streak Tracking ──────────────────────────────────
-def _record_param_manipulation(volunteer_address: str, violation_code: str) -> int:
-    """Track parameter manipulation attempts. Returns new streak count."""
+# ─── Ban helpers ──────────────────────────────────────────────────────────────
+def _record_fraud_attempt(volunteer_address: str, reason: str) -> int:
     addr      = volunteer_address.lower()
-    streak_key = f"satin:param_manip_streak:{addr}"
+    streak_key = f"satin:fraud_streak:{addr}"
     streak     = redis_client.incr(streak_key)
-    redis_client.expire(streak_key, 7 * 24 * 3600)  # reset if clean for 7 days
-    log.warning(
-        f"[PARAM_MANIP] {addr} parameter manipulation streak: {streak} "
-        f"(violation: {violation_code})"
-    )
+    redis_client.expire(streak_key, 7 * 24 * 3600)
+    log.warning(f"[FRAUD_STREAK] {addr} streak={streak} reason={reason}")
     return streak
 
 
@@ -292,25 +272,26 @@ async def health():
     return {
         "status":         "operational",
         "oracle_address": evaluator._signer.oracle_address,
-        "version":        "1.3.0",
+        "version":        "2.0.0-AAD",
         "timestamp":      int(time.time()),
+        "architecture":   "Autonomous AI Deduction — no user sliders",
         "features": {
-            "llm_validator": bool(os.getenv("ANTHROPIC_API_KEY")),
-            "exif_check":    True,
-            "ela_check":     True,
-            "param_validator": True,
-            "yolo_triangulation": True,
+            "aad_enabled":          True,
+            "llava_deduction":      True,
+            "yolo_triangulation":   True,
+            "exif_check":           True,
+            "ela_check":            True,
+            "reward_gate":          f"penalty > {REWARD_GATE_MAX_PENALTY:.0%} → reward=0",
         }
     }
 
 
-@app.get("/api/v1/challenge", summary="Get Photo Challenge Nonce")
+@app.get("/api/v1/challenge")
 async def get_challenge(api_key: str = Security(verify_api_key)) -> Dict[str, Any]:
     now        = int(time.time())
     code       = f"APEX-{secrets.randbelow(9000) + 1000}"
     expires_at = now + 600
     redis_client.setex(f"satin:challenge:{code}", 600, expires_at)
-    log.info(f"[CHALLENGE] Issued: {code}")
     return {
         "code":        code,
         "expires_at":  expires_at,
@@ -327,14 +308,14 @@ async def verify_impact(
     api_key: str = Security(verify_api_key),
 ) -> Dict[str, Any]:
 
-    t_start = time.perf_counter()
-
-    # ── Auto-ban check ─────────────────────────────────────────────────────────
+    t_start    = time.perf_counter()
     addr_lower = body.volunteer_address.lower()
+
+    # ── Ban check ──────────────────────────────────────────────────────────────
     if redis_client.get(f"satin:banned:{addr_lower}"):
         raise HTTPException(
             status_code=403,
-            detail="Address is BANNED due to repeated fraudulent/manipulative submissions."
+            detail="Address is BANNED due to repeated fraudulent submissions."
         )
 
     # ── Decode image ───────────────────────────────────────────────────────────
@@ -342,33 +323,24 @@ async def verify_impact(
     if body.image_base64:
         try:
             image_bytes = base64.b64decode(body.image_base64)
-            log.info(f"Image received — {len(image_bytes):,} bytes")
+            log.info(f"[AAD] Image received — {len(image_bytes):,} bytes")
         except Exception as e:
             log.warning(f"Failed to decode image_base64: {e}")
 
-    # ── Run CV verification early to get YOLO results for param validator ──────
+    # ── STEP 1: Run YOLO first (fast, no LLM yet) ─────────────────────────────
     yolo_result: Dict[str, Any] = {}
-    person_count_yolo: Optional[int] = None
-    detected_objects: Optional[list] = None
-
     if image_bytes:
         try:
-            yolo_result      = evaluator.cv_verifier.verify_image_from_bytes(image_bytes)
-            detected_objects = yolo_result.get("detected_objects", [])
-            # Count person detections from raw boxes (more accurate than just presence check)
-            # The CV verifier returns detected_objects as a SET (unique), so we use
-            # a separate count from the raw result if available, else estimate from presence
-            person_count_yolo = yolo_result.get("person_count", 1 if "person" in (detected_objects or []) else 0)
+            yolo_result = evaluator.cv_verifier.verify_image_from_bytes(image_bytes)
             log.info(
-                f"[CV-EARLY] confidence={yolo_result.get('confidence',0):.2%} "
-                f"objects={detected_objects} person_count={person_count_yolo}"
+                f"[YOLO] confidence={yolo_result.get('confidence',0):.2%} "
+                f"people={yolo_result.get('person_count',0)} "
+                f"objects={yolo_result.get('detected_objects',[])} "
             )
         except Exception as e:
-            log.warning(f"[CV-EARLY] Early YOLO failed: {e}")
+            log.warning(f"[YOLO] Failed: {e}")
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 1: FRAUD / SYBIL DETECTION (unchanged)
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── STEP 2: Fraud & Sybil Detection ───────────────────────────────────────
     source = body.source or "gallery"
     fraud_result = fraud_detector.check_all(
         volunteer_address = body.volunteer_address,
@@ -389,83 +361,56 @@ async def verify_impact(
     authenticity_penalty = fraud_result.get("authenticity_penalty", 0.0)
     is_high_risk         = fraud_result.get("is_high_risk", False)
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 2: PARAMETER INTEGRITY VALIDATION (NEW v1.3.0)
-    # ═══════════════════════════════════════════════════════════════════════════
-    description_text = body.description or ""
-    param_result = param_validator.validate(
-        action_type        = body.action_type.value,
-        urgency_level      = body.urgency_level.upper(),
-        effort_hours       = body.effort_hours,
-        people_helped      = body.people_helped,
-        description        = description_text,
-        detected_objects   = detected_objects,
-        person_count_yolo  = person_count_yolo,
-        image_bytes        = image_bytes,
+    # ── STEP 3: AI DEDUCTION — Core AAD engine ────────────────────────────────
+    # LLaVA + YOLO menyimpulkan semua parameter. Tidak ada user input untuk scoring.
+    log.info(f"[AAD] Starting AI parameter deduction for {addr_lower}...")
+    
+    deduction = deduce_parameters_from_ai(
+        description  = body.description,
+        image_bytes  = image_bytes,
+        yolo_result  = yolo_result,
+        source       = source,
     )
 
-    # Hard block from parameter validation
+    # ── STEP 4: Validate AI deduction output ─────────────────────────────────
+    param_result = param_validator.validate_ai_deduction(deduction)
+
     if param_result.hard_blocked:
-        # Record streak
-        streak = _record_param_manipulation(body.volunteer_address, "hard_block")
+        streak = _record_fraud_attempt(body.volunteer_address, "ai_deduction_fraud")
         if streak >= PARAM_MANIP_STREAK_BAN:
             redis_client.set(f"satin:banned:{addr_lower}", "true")
-            log.warning(f"[BAN] {addr_lower} auto-banned after {streak} parameter manipulation attempts")
         raise HTTPException(
             status_code=422,
-            detail=f"Parameter Integrity Violation: {param_result.block_reason}",
+            detail=f"AI mendeteksi submission tidak valid: {param_result.block_reason}",
         )
 
-    # Log and track parameter violations even if not hard-blocked
-    if param_result.total_penalty > 0.20:
-        streak = _record_param_manipulation(body.volunteer_address, "soft_penalty")
-        if streak >= PARAM_MANIP_STREAK_BAN:
-            redis_client.set(f"satin:banned:{addr_lower}", "true")
-            log.warning(f"[BAN] {addr_lower} auto-banned after {streak} parameter manipulation attempts")
+    # Combine all penalties
+    total_penalty = min(0.85, authenticity_penalty + param_result.total_penalty)
 
-    # Apply adjusted parameters to prevent score gaming
-    effective_effort_hours = param_result.adjusted_effort_hours or body.effort_hours
-    effective_people_helped = param_result.adjusted_people_helped or body.people_helped
+    # ── REWARD GATE: Hard threshold ────────────────────────────────────────────
+    # v2.0 FIX: Jika penalty terlalu tinggi, reward = 0 dan masuk community review
+    # Tidak ada lagi "kena penalti tapi tetap dapat reward"
+    reward_gated = total_penalty >= REWARD_GATE_MAX_PENALTY
+    if reward_gated:
+        integrity_warnings.append(f"reward_gated_penalty_{total_penalty:.0%}")
+        log.warning(
+            f"[REWARD_GATE] {addr_lower}: penalty={total_penalty:.0%} "
+            f"≥ threshold={REWARD_GATE_MAX_PENALTY:.0%} → reward=0"
+        )
 
-    # Urgency downgrade if urgency was manipulated
-    effective_urgency = body.urgency_level
-    if "urgency_incompatible_with_action" in param_result.warnings or \
-       "critical_urgency_without_context" in param_result.warnings or \
-       "critical_urgency_banned_for_action" in param_result.warnings:
-        # Downgrade urgency to the highest allowed for this action
-        from engine.parameter_validator import ACTION_CONSTRAINTS
-        constraint  = ACTION_CONSTRAINTS.get(body.action_type.value.upper(), {})
-        allowed_urg = constraint.get("urgency_allowed", ["LOW", "MEDIUM", "HIGH"])
-        urgency_rank = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
-        max_allowed  = max(allowed_urg, key=lambda x: urgency_rank.get(x, 0))
-        if urgency_rank.get(body.urgency_level.upper(), 4) > urgency_rank.get(max_allowed, 3):
-            effective_urgency = max_allowed
-            integrity_warnings.append(f"urgency_downgraded_to_{max_allowed.lower()}")
-            log.warning(
-                f"[PARAM] Urgency downgraded: {body.urgency_level} → {effective_urgency} "
-                f"(action: {body.action_type.value})"
-            )
+    # ── STEP 5: Build Evidence Bundle dari AI-deduced params ──────────────────
+    # PENTING: Semua nilai berasal dari AI, bukan user input
+    try:
+        effective_action_type  = ActionType(deduction.action_type)
+    except ValueError:
+        effective_action_type  = ActionType.FOOD_DISTRIBUTION
 
-    # Add parameter warnings to integrity_warnings
-    integrity_warnings.extend([f"param_{w}" for w in param_result.warnings])
+    # Jika CRITICAL tapi AI confidence rendah → downgrade ke HIGH
+    effective_urgency = deduction.urgency_level
+    if deduction.urgency_level == "CRITICAL" and deduction.confidence < 0.60:
+        effective_urgency = "HIGH"
+        integrity_warnings.append("urgency_downgraded_low_confidence")
 
-    # Combine penalties
-    total_authenticity_penalty = min(
-        0.85,
-        authenticity_penalty + param_result.total_penalty
-    )
-
-    log.info(
-        f"[PARAM_VALIDATOR] action={body.action_type.value} "
-        f"penalty={param_result.total_penalty:.0%} "
-        f"warnings={param_result.warnings} "
-        f"llm_verdict={param_result.llm_verdict}"
-    )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 3: HIGH RISK CLAMPING (existing logic, enhanced)
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Build evidence bundle with ADJUSTED (validated) parameters
     evidence = EvidenceBundle(
         ipfs_cid            = body.ipfs_cid,
         evidence_type       = body.evidence_type,
@@ -475,141 +420,151 @@ async def verify_impact(
             longitude       = body.gps.longitude,
             accuracy_meters = body.gps.accuracy_meters,
         ),
-        action_type         = body.action_type,
-        people_helped       = effective_people_helped,    # ← ADJUSTED
+        action_type         = effective_action_type,
+        people_helped       = deduction.final_people_helped,   # ← AI deduced
         volunteer_address   = body.volunteer_address,
         beneficiary_address = body.beneficiary_address,
         country_iso         = body.country_iso,
-        description         = description_text,
-        urgency_level       = effective_urgency,          # ← ADJUSTED
-        effort_hours        = effective_effort_hours,     # ← ADJUSTED
+        description         = body.description,
+        urgency_level       = effective_urgency,               # ← AI deduced
+        effort_hours        = deduction.final_effort_hours,    # ← AI deduced
     )
 
+    # Extra clamp for high-risk submissions
     if is_high_risk:
-        log.warning(
-            f"[FRAUD] HIGH RISK FLAG! Clamping: "
-            f"effort={evidence.effort_hours}→min(1.0), "
-            f"people={evidence.people_helped}→min(2), urgency→LOW"
-        )
         evidence.effort_hours  = min(evidence.effort_hours, 1.0)
         evidence.people_helped = min(evidence.people_helped, 2)
         evidence.urgency_level = "LOW"
-        integrity_warnings.append("high_risk_multipliers_clamped")
+        integrity_warnings.append("high_risk_params_clamped")
 
     # Capture timestamp freshness
-    if body.source == "live_capture" and body.capture_timestamp:
+    if source == "live_capture" and body.capture_timestamp:
         age_ms  = int(time.time() * 1000) - body.capture_timestamp
         age_min = age_ms / 60_000
         if age_min > 15:
-            log.warning(f"[TIMESTAMP] Live capture is {age_min:.1f} min old")
             integrity_warnings.append(f"capture_stale_{int(age_min)}min")
-            total_authenticity_penalty = min(1.0, total_authenticity_penalty + 0.10)
+            total_penalty = min(1.0, total_penalty + 0.10)
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 4: ORACLE EVALUATION
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── STEP 6: Oracle Evaluation ──────────────────────────────────────────────
     try:
         payload: OraclePayload = evaluator.evaluate(evidence, image_bytes=image_bytes)
 
     except EvaluationFailedError as eval_err:
-        err_msg = str(eval_err)
-        if "Insufficient impact" in err_msg:
-            log.warning(f"[STREAM] Low score → community review: {err_msg}")
-            event_id = str(uuid.uuid4())
-            low_score_entry = {
-                "event_id":               event_id,
-                "volunteer_address":      body.volunteer_address,
-                "action_type":            body.action_type,
-                "urgency_level":          effective_urgency,
-                "description":            description_text,
-                "latitude":               body.gps.latitude,
-                "longitude":              body.gps.longitude,
-                "effort_hours":           effective_effort_hours,
-                "people_helped":          effective_people_helped,
-                "impact_score":           round(eval_err.impact_score, 2),
-                "ai_confidence":          round(eval_err.ai_confidence, 4),
-                "token_reward":           0.0,
-                "source":                 source,
-                "image_base64":           body.image_base64,
-                "integrity_warnings":     integrity_warnings + ["impact_below_threshold"],
-                "parameter_warnings":     param_result.warnings,
-                "needs_community_review": True,
-                "needs_champion_audit":   is_high_risk or body.urgency_level == "CRITICAL",
-                "submitted_at":           int(time.time()),
-            }
-            redis_client.lpush("satin:stream_store", json.dumps(low_score_entry))
-            redis_client.ltrim("satin:stream_store", 0, 99)
-            vote_data = {
-                "votes":     {},
-                "opened_at": int(time.time()),
-                "outcome":   None,
-                "needs_champion_audit": is_high_risk or body.urgency_level == "CRITICAL",
-            }
-            redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vote_data))
-            return {
-                "event_id":                event_id,
-                "impact_score":            round(eval_err.impact_score, 2),
-                "ai_confidence":           round(eval_err.ai_confidence, 4),
-                "token_reward":            0.0,
-                "integrity_warnings":      low_score_entry["integrity_warnings"],
-                "authenticity_penalty":    total_authenticity_penalty,
-                "parameter_warnings":      param_result.warnings,
-                "parameter_penalty":       round(param_result.total_penalty, 3),
-                "adjusted_people_helped":  effective_people_helped,
-                "adjusted_effort_hours":   effective_effort_hours,
-                "llm_verdict":             param_result.llm_verdict,
-                "needs_community_review":  True,
-                "contract_args":           None,
-                "processing_time_ms":      round((time.perf_counter() - t_start) * 1000, 2),
-            }
-        raise
+        # Low score → community review
+        event_id = str(uuid.uuid4())
+        low_score_entry = {
+            "event_id":               event_id,
+            "volunteer_address":      body.volunteer_address,
+            "action_type":            effective_action_type.value,
+            "urgency_level":          effective_urgency,
+            "description":            body.description,
+            "latitude":               body.gps.latitude,
+            "longitude":              body.gps.longitude,
+            "effort_hours":           deduction.final_effort_hours,
+            "people_helped":          deduction.final_people_helped,
+            "impact_score":           round(eval_err.impact_score, 2),
+            "ai_confidence":          round(eval_err.ai_confidence, 4),
+            "token_reward":           0.0,
+            "source":                 source,
+            "image_base64":           body.image_base64,
+            "integrity_warnings":     integrity_warnings + ["impact_below_threshold"],
+            "ai_deduced": {
+                "action_type":    deduction.action_type,
+                "urgency_level":  deduction.urgency_level,
+                "people_helped":  deduction.final_people_helped,
+                "effort_hours":   deduction.final_effort_hours,
+                "confidence":     deduction.confidence,
+                "scene_context":  deduction.scene_context,
+                "fraud_indicators": deduction.fraud_indicators,
+            },
+            "needs_community_review": True,
+            "needs_champion_audit":   is_high_risk or deduction.urgency_level == "CRITICAL",
+            "submitted_at":           int(time.time()),
+        }
+        redis_client.lpush("satin:stream_store", json.dumps(low_score_entry))
+        redis_client.ltrim("satin:stream_store", 0, 99)
+        vote_data = {
+            "votes":     {},
+            "opened_at": int(time.time()),
+            "outcome":   None,
+            "needs_champion_audit": is_high_risk,
+        }
+        redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vote_data))
+        return {
+            "event_id":               event_id,
+            "impact_score":           round(eval_err.impact_score, 2),
+            "ai_confidence":          round(eval_err.ai_confidence, 4),
+            "token_reward":           0.0,
+            "integrity_warnings":     low_score_entry["integrity_warnings"],
+            "authenticity_penalty":   total_penalty,
+            "ai_deduced":             low_score_entry["ai_deduced"],
+            "needs_community_review": True,
+            "contract_args":          None,
+            "processing_time_ms":     round((time.perf_counter() - t_start) * 1000, 2),
+        }
 
-    # ── Apply parameter penalty to final impact score ─────────────────────────
-    # The oracle computed a raw score; we reduce it by total_authenticity_penalty
-    if total_authenticity_penalty > 0:
-        original_score = payload.impact_score
-        # Apply penalty multiplicatively — more intuitive than subtractive
-        adjusted_score = round(original_score * (1.0 - total_authenticity_penalty), 4)
+    # ── STEP 7: Apply penalty to score ────────────────────────────────────────
+    original_score = payload.impact_score
+    if total_penalty > 0:
+        adjusted_score       = round(original_score * (1.0 - total_penalty), 4)
         payload.impact_score = max(0.0, adjusted_score)
         log.info(
-            f"[SCORE_ADJUST] {original_score:.2f} × (1 - {total_authenticity_penalty:.2%}) "
+            f"[SCORE] {original_score:.2f} × (1-{total_penalty:.2%}) "
             f"= {payload.impact_score:.2f}"
         )
+
+    # ── STEP 8: Apply Reward Gate ──────────────────────────────────────────────
+    # v2.0 FIX: Reward harus nol jika penalty terlalu tinggi
+    # Token reward dihitung ulang dari adjusted score, bukan original
+    if reward_gated:
+        payload.token_reward = 0.0
+        log.warning(f"[REWARD_GATE] Token reward set to 0 — submission masuk community review")
+    else:
+        # Recalculate token reward from adjusted (penalized) score
+        score_normalized     = payload.impact_score / 100.0
+        payload.token_reward = round(5.0 + (score_normalized ** 1.5) * 45.0, 4)
+        payload.token_reward = min(payload.token_reward, 100.0)
 
     processing_ms = round((time.perf_counter() - t_start) * 1000, 2)
 
     # ── Community Stream ───────────────────────────────────────────────────────
-    needs_champion_audit = is_high_risk or (
-        body.urgency_level == "CRITICAL" and payload.ai_confidence < 0.60
-    )
-    # Flag for community review if: low confidence OR high param penalty OR LLM flagged
     needs_review = (
         payload.ai_confidence < COMMUNITY_REVIEW_CONFIDENCE
-        or needs_champion_audit
-        or param_result.total_penalty >= 0.30
-        or param_result.llm_verdict in ("suspicious", "fabricated")
+        or is_high_risk
+        or reward_gated
+        or len(deduction.fraud_indicators) > 0
     )
+
+    ai_deduced_info = {
+        "action_type":      deduction.action_type,
+        "urgency_level":    effective_urgency,
+        "people_helped":    deduction.final_people_helped,
+        "effort_hours":     deduction.final_effort_hours,
+        "confidence":       round(deduction.confidence, 3),
+        "scene_context":    deduction.scene_context,
+        "yolo_person_count": deduction.yolo_person_count,
+        "fraud_indicators": deduction.fraud_indicators,
+        "reasoning":        deduction.reasoning,
+    }
 
     stream_entry = {
         "event_id":              payload.event_id,
         "volunteer_address":     body.volunteer_address,
-        "action_type":           body.action_type,
+        "action_type":           effective_action_type.value,
         "urgency_level":         effective_urgency,
-        "description":           description_text,
+        "description":           body.description,
         "latitude":              body.gps.latitude,
         "longitude":             body.gps.longitude,
-        "effort_hours":          effective_effort_hours,
-        "people_helped":         effective_people_helped,
+        "effort_hours":          deduction.final_effort_hours,
+        "people_helped":         deduction.final_people_helped,
         "impact_score":          round(payload.impact_score, 2),
         "ai_confidence":         round(payload.ai_confidence, 4),
         "token_reward":          round(payload.token_reward, 4),
         "source":                source,
-        "image_base64":          body.image_base64 if body.image_base64 else None,
+        "image_base64":          body.image_base64,
         "integrity_warnings":    integrity_warnings,
-        "parameter_warnings":    param_result.warnings,
-        "llm_verdict":           param_result.llm_verdict,
+        "ai_deduced":            ai_deduced_info,
         "needs_community_review": needs_review,
-        "needs_champion_audit":  needs_champion_audit,
         "submitted_at":          int(time.time()),
     }
     redis_client.lpush("satin:stream_store", json.dumps(stream_entry))
@@ -620,46 +575,23 @@ async def verify_impact(
             "votes":     {},
             "opened_at": int(time.time()),
             "outcome":   None,
-            "needs_champion_audit": needs_champion_audit,
+            "needs_champion_audit": is_high_risk,
         }
         redis_client.set(f"satin:vote_store:{payload.event_id}", json.dumps(vote_data))
 
-    # Record successful submission
+    # Record fraud detector
     fraud_detector.record_sha256(body.hash_sha256, body.volunteer_address)
     fraud_detector.record_submission(body.volunteer_address)
-    # Reset parameter manipulation streak on clean submission
-    if param_result.total_penalty < 0.10:
-        redis_client.delete(f"satin:param_manip_streak:{addr_lower}")
 
     return {
         **_payload_to_dict(payload),
-        "contract_args":           payload.to_contract_args(),
-        "processing_time_ms":      processing_ms,
-        "integrity_warnings":      integrity_warnings,
-        "authenticity_penalty":    total_authenticity_penalty,
-        "parameter_warnings":      param_result.warnings,
-        "parameter_penalty":       round(param_result.total_penalty, 3),
-        "adjusted_people_helped":  effective_people_helped,
-        "adjusted_effort_hours":   effective_effort_hours,
-        "llm_verdict":             param_result.llm_verdict,
-        "needs_community_review":  needs_review,
+        "contract_args":          payload.to_contract_args(),
+        "processing_time_ms":     processing_ms,
+        "integrity_warnings":     integrity_warnings,
+        "authenticity_penalty":   total_penalty,
+        "ai_deduced":             ai_deduced_info,
+        "needs_community_review": needs_review,
     }
-
-
-@app.post("/api/v1/verify/batch", summary="Batch Verify Impact Events")
-async def batch_verify(
-    request: Request,
-    body:    BatchVerifyRequest,
-    api_key: str = Depends(verify_api_key),
-) -> Dict[str, Any]:
-    results = []
-    for event in body.events:
-        try:
-            response = await verify_impact(request, event, api_key)
-            results.append({"success": True, "data": response})
-        except HTTPException as e:
-            results.append({"success": False, "error": e.detail})
-    return {"total": len(results), "results": results}
 
 
 # ─── Community Stream ─────────────────────────────────────────────────────────
@@ -763,11 +695,10 @@ async def cast_vote(body: VoteRequest, api_key: str = Security(verify_api_key)) 
             except Exception as ce:
                 log.error(f"[VOTE] Failed to build claim payload: {ce}")
             vol_addr = stream_entry["volunteer_address"].lower()
-            redis_client.delete(f"satin:reject_streak:{vol_addr}")
-            redis_client.delete(f"satin:param_manip_streak:{vol_addr}")
+            redis_client.delete(f"satin:fraud_streak:{vol_addr}")
         elif outcome == "rejected" and stream_entry:
             vol_addr   = stream_entry["volunteer_address"].lower()
-            streak_key = f"satin:reject_streak:{vol_addr}"
+            streak_key = f"satin:fraud_streak:{vol_addr}"
             streak     = redis_client.incr(streak_key)
             redis_client.expire(streak_key, 7 * 24 * 3600)
             if streak >= 3:
@@ -795,41 +726,31 @@ async def get_claim(event_id: str, api_key: str = Security(verify_api_key)) -> D
                 break
         if not stream_entry:
             raise HTTPException(status_code=503, detail="Stream entry not found.")
-        try:
-            payload_dict, contract_args = _build_community_claim_payload(stream_entry)
-            vd["claim_payload"]         = payload_dict
-            vd["claim_contract_args"]   = contract_args
-            redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vd))
-        except Exception as ce:
-            raise HTTPException(status_code=503, detail=f"Cannot generate claim: {ce}")
+        payload_dict, contract_args = _build_community_claim_payload(stream_entry)
+        vd["claim_payload"]         = payload_dict
+        vd["claim_contract_args"]   = contract_args
+        redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vd))
     return {**vd["claim_payload"], "contract_args": vd["claim_contract_args"]}
 
 
 @app.get("/api/v1/oracle/info")
 async def oracle_info(_: str = Depends(verify_api_key)) -> Dict[str, Any]:
     return {
-        "oracle_address":      evaluator._signer.oracle_address,
-        "protocol":            "APEX HUMANITY — SATIN v1.3.0",
-        "supported_actions":   [a.value for a in ActionType],
-        "rate_limit":          RATE_LIMIT_VERIFY,
-        "allowed_origins":     ALLOWED_ORIGINS,
-        "score_weights":       {"urgency": 0.35, "difficulty": 0.25, "reach": 0.20, "authenticity": 0.20},
-        "base_token_reward":   100.0,
-        "min_score_threshold": 30.0,
-        "signing_algorithm":   "ECDSA secp256k1",
-        "llm_validator":       bool(os.getenv("ANTHROPIC_API_KEY")),
+        "oracle_address":    evaluator._signer.oracle_address,
+        "protocol":          "APEX HUMANITY — SATIN v2.0.0 AAD",
+        "architecture":      "Autonomous AI Deduction — user input removed from scoring",
+        "supported_actions": ["AI-deduced automatically from photo+description"],
+        "rate_limit":        RATE_LIMIT_VERIFY,
+        "reward_gate":       f"penalty > {REWARD_GATE_MAX_PENALTY:.0%} → reward=0",
         "integrity_layers": [
             "sha256_exact_dedup",
             "perceptual_hash_sybil",
             "exif_timestamp_validation",
-            "exif_gps_mismatch_detection",
             "ela_manipulation_detection",
-            "live_capture_timestamp_freshness",
-            "param_action_constraint_matrix",       # NEW v1.3.0
-            "param_effort_people_ratio_check",      # NEW v1.3.0
-            "param_urgency_action_compatibility",   # NEW v1.3.0
-            "param_description_keyword_validation", # NEW v1.3.0
-            "param_yolo_person_count_triangulation",# NEW v1.3.0
-            "param_llm_cross_validator",            # NEW v1.3.0
+            "llava_parameter_deduction",        # NEW v2.0
+            "yolo_person_count_reconciliation", # NEW v2.0
+            "ai_deduction_fraud_indicators",    # NEW v2.0
+            "reward_gate_hard_threshold",       # NEW v2.0 FIX
+            "token_reward_from_adjusted_score", # NEW v2.0 FIX
         ],
     }
