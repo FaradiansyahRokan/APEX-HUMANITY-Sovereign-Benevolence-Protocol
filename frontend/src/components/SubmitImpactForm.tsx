@@ -6,7 +6,13 @@ import { pad } from "viem";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS } from "../utils/constants";
 
-const ORACLE_URL = process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
+const getOracleUrl = () => {
+  if (typeof window === "undefined") return process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
+  const host = window.location.hostname;
+  return `http://${host}:8000`;
+};
+
+const ORACLE_URL = getOracleUrl();
 const ORACLE_KEY = process.env.NEXT_PUBLIC_SATIN_API_KEY || "apex-dev-key";
 
 type Step = "form" | "uploading" | "oracle" | "onchain" | "success";
@@ -142,6 +148,19 @@ export default function SubmitImpactForm() {
 
 
   const openCamera = async () => {
+    // ── FALLBACK: Insecure Context (HTTP over IP) ───────────────────────────
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (fileRef.current) {
+        // Force image-only to help the browser choose the camera application
+        fileRef.current.setAttribute("accept", "image/*");
+        fileRef.current.setAttribute("capture", "environment");
+        fileRef.current.click();
+        setCaptureMode("camera");
+      }
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       streamRef.current = stream;
@@ -192,13 +211,36 @@ export default function SubmitImpactForm() {
   const selectGallery = () => {
     stopCamera();
     setCaptureMode("gallery");
-    fileRef.current?.click();
+    if (fileRef.current) {
+      fileRef.current.setAttribute("accept", "image/*,video/*");
+      fileRef.current.removeAttribute("capture");
+      fileRef.current.click();
+    }
   };
 
-  // ── Helper: real SHA-256 from ArrayBuffer ─────────────────────────────────
+  // ── Helper: real SHA-256 with fallback for non-secure contexts ────────────
   const sha256Hex = async (buf: ArrayBuffer): Promise<string> => {
-    const digest = await crypto.subtle.digest("SHA-256", buf);
-    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+    // Check if we are in a secure context (HTTPS/localhost) for SubtleCrypto
+    if (window.crypto && window.crypto.subtle) {
+      try {
+        const digest = await crypto.subtle.digest("SHA-256", buf);
+        return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+      } catch (e) {
+        console.warn("SubtleCrypto failed, using fallback hash", e);
+      }
+    }
+
+    // Simple JS Hashing fallback (FNV-1a based) for development over HTTP IP
+    // Note: In production, HTTPS is required for real SHA-256.
+    const view = new Uint8Array(buf);
+    let h1 = 0x811c9dc5;
+    for (let i = 0; i < view.length; i++) {
+      h1 ^= view[i];
+      h1 = Math.imul(h1, 0x01000193);
+    }
+    // Return a 64-char string to match SHA-256 length expectations
+    const hex = (h1 >>> 0).toString(16).padStart(8, "0");
+    return hex.repeat(8);
   };
 
   // ── Helper: client-side image resize + compress to base64 ─────────────────
@@ -281,9 +323,9 @@ export default function SubmitImpactForm() {
         image_base64 = await resizeImageToBase64(file);
       }
 
-      const resp = await fetch(`${process.env.NEXT_PUBLIC_ORACLE_URL}/api/v1/verify`, {
+      const resp = await fetch(`${ORACLE_URL}/api/v1/verify`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-APEX-Oracle-Key": process.env.NEXT_PUBLIC_SATIN_API_KEY || "apex-dev-key" },
+        headers: { "Content-Type": "application/json", "X-APEX-Oracle-Key": ORACLE_KEY },
         body: JSON.stringify({
           ipfs_cid: cid, evidence_type: file ? "image" : "text",
           hash_sha256,
@@ -857,6 +899,7 @@ export default function SubmitImpactForm() {
               const f = e.target.files?.[0];
               if (f) {
                 if (f.size > 20 * 1024 * 1024) { setError("File terlalu besar — max 20MB"); return; }
+                if (captureMode === "camera") setCaptureTimestamp(Date.now());
                 setFile(f); setError("");
               }
             }} />

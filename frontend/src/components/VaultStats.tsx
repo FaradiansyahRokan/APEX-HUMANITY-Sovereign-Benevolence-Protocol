@@ -27,24 +27,24 @@ function AnimNum({ to, dec = 0 }: { to: number; dec?: number }) {
 // ─── Custom Animated SVGs (Fisika & Jaringan Vektor) ───────────────────
 const IconVerified = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-    <path className="svg-draw" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="url(#grad1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path className="svg-pulse" d="M9 12l2 2 4-4" stroke="url(#grad1)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path className="svg-draw" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="url(#grad1)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path className="svg-pulse" d="M9 12l2 2 4-4" stroke="url(#grad1)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
 const IconVolunteers = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
     <circle cx="12" cy="7" r="3" stroke="url(#grad2)" strokeWidth="1.5" className="svg-float" />
-    <circle cx="6" cy="17" r="3" stroke="url(#grad2)" strokeWidth="1.5" className="svg-float" style={{ animationDelay: "0.4s" }}/>
-    <circle cx="18" cy="17" r="3" stroke="url(#grad2)" strokeWidth="1.5" className="svg-float" style={{ animationDelay: "0.8s" }}/>
-    <path d="M10.5 9.5l-3 4.5M13.5 9.5l3 4.5M8.5 17h7" stroke="url(#grad2)" strokeWidth="1.5" strokeDasharray="3 3" className="svg-flow"/>
+    <circle cx="6" cy="17" r="3" stroke="url(#grad2)" strokeWidth="1.5" className="svg-float" style={{ animationDelay: "0.4s" }} />
+    <circle cx="18" cy="17" r="3" stroke="url(#grad2)" strokeWidth="1.5" className="svg-float" style={{ animationDelay: "0.8s" }} />
+    <path d="M10.5 9.5l-3 4.5M13.5 9.5l3 4.5M8.5 17h7" stroke="url(#grad2)" strokeWidth="1.5" strokeDasharray="3 3" className="svg-flow" />
   </svg>
 );
 
 const IconApex = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-    <path className="svg-draw" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="url(#grad3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path className="svg-glow-core" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#grad3)" opacity="0.3"/>
+    <path className="svg-draw" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="url(#grad3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path className="svg-glow-core" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#grad3)" opacity="0.3" />
   </svg>
 );
 
@@ -52,7 +52,7 @@ const IconImpact = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
     <ellipse cx="12" cy="12" rx="10" ry="4" stroke="url(#grad4)" strokeWidth="1.5" transform="rotate(45 12 12)" className="svg-orbit" />
     <ellipse cx="12" cy="12" rx="10" ry="4" stroke="url(#grad4)" strokeWidth="1.5" transform="rotate(-45 12 12)" className="svg-orbit-reverse" />
-    <circle cx="12" cy="12" r="2" fill="url(#grad4)" className="svg-pulse"/>
+    <circle cx="12" cy="12" r="2" fill="url(#grad4)" className="svg-pulse" />
   </svg>
 );
 
@@ -61,7 +61,7 @@ const STAT_STYLES = [
   { colors: ["#00dfb2", "#7c6aff"], glow: "rgba(0,223,178,0.25)", icon: <IconVerified /> },
   { colors: ["#7c6aff", "#ff6eb4"], glow: "rgba(124,106,255,0.25)", icon: <IconVolunteers /> },
   { colors: ["#ffbd59", "#ff6eb4"], glow: "rgba(255,189,89,0.25)", icon: <IconApex /> },
-  { colors: ["#7c6aff", "#00dfb2"], glow: "rgba(124,106,255,0.2)",  icon: <IconImpact /> },
+  { colors: ["#7c6aff", "#00dfb2"], glow: "rgba(124,106,255,0.2)", icon: <IconImpact /> },
 ];
 
 export default function VaultStats() {
@@ -78,9 +78,9 @@ export default function VaultStats() {
 
   const stats = [
     { label: "Events Verified", value: vault ? Number(vault[2]) : null, dec: 0 },
-    { label: "Volunteers",      value: global ? Number(global[0]) : null, dec: 0 },
+    { label: "Volunteers", value: global ? Number(global[0]) : null, dec: 0 },
     { label: "APEX Distributed", value: vault ? Number(formatUnits(vault[1], 18)) : null, dec: 2 },
-    { label: "Total Impact",    value: global ? Number(global[1]) / 100 : null, dec: 0 },
+    { label: "Total Impact", value: global ? Number(global[1]) / 100 : null, dec: 0 },
   ];
 
   return (
@@ -112,12 +112,9 @@ export default function VaultStats() {
         animation: "slideGradient 4s linear infinite"
       }} />
 
-      <div style={{
+      <div className="stats-grid" style={{
         maxWidth: "var(--mw)", margin: "0 auto",
-        padding: "0 40px",
-        display: "grid",
-        gridTemplateColumns: "repeat(4,1fr) auto",
-        alignItems: "stretch",
+        padding: "0 20px", display: "grid", alignItems: "stretch",
       }}>
         {stats.map((s, i) => {
           const style = STAT_STYLES[i];
@@ -125,9 +122,6 @@ export default function VaultStats() {
           return (
             <div key={s.label} className="cyber-stat-card" style={{
               padding: "22px 0",
-              paddingRight: i < stats.length - 1 ? "28px" : 0,
-              paddingLeft: i > 0 ? "28px" : 0,
-              borderRight: i < stats.length - 1 ? "1px solid rgba(255,255,255,0.05)" : undefined,
               position: "relative",
               cursor: "default",
             }}>
@@ -142,7 +136,7 @@ export default function VaultStats() {
                 transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
               }} />
 
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px", position: "relative" }}>
+              <div className="stat-header" style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px", position: "relative" }}>
                 {/* Frame Ikon Cyberpunk */}
                 <div className="cyber-icon-box" style={{
                   width: "32px", height: "32px", borderRadius: "8px",
@@ -165,14 +159,13 @@ export default function VaultStats() {
 
               <p style={{
                 fontFamily: "'JetBrains Mono', monospace",
-                fontSize: "26px", fontWeight: 700,
+                fontWeight: 700,
                 background: s.value !== null ? gradText : "none",
                 WebkitBackgroundClip: s.value !== null ? "text" : undefined,
                 WebkitTextFillColor: s.value !== null ? "transparent" : undefined,
                 color: s.value !== null ? "transparent" : "rgba(255,255,255,0.2)",
-                letterSpacing: "-0.04em", lineHeight: 1,
+                lineHeight: 1,
                 position: "relative",
-                paddingLeft: "42px", // Menyeimbangkan secara geometris dengan lebar ikon
                 transition: "transform 0.3s ease",
               }} className="cyber-value">
                 {s.value !== null
@@ -184,40 +177,6 @@ export default function VaultStats() {
           );
         })}
 
-        {/* Live badge - Precision HUD Style */}
-        <div style={{
-          display: "flex", alignItems: "center",
-          paddingLeft: "28px",
-          borderLeft: "1px solid rgba(255,255,255,0.05)",
-        }}>
-          <div style={{
-            display: "flex", alignItems: "center", gap: "8px",
-            padding: "6px 14px", borderRadius: "4px",
-            background: "rgba(0,223,178,0.05)",
-            border: "1px solid rgba(0,223,178,0.3)",
-            position: "relative",
-            overflow: "hidden"
-          }}>
-            {/* Scanline overlay pada badge */}
-            <div style={{
-              position: "absolute", inset: 0, opacity: 0.2,
-              background: "repeating-linear-gradient(0deg, transparent, transparent 2px, #00dfb2 2px, #00dfb2 3px)"
-            }}/>
-            
-            <div style={{
-              width: "6px", height: "6px",
-              background: "#00dfb2",
-              boxShadow: "0 0 10px #00dfb2, 0 0 20px #00dfb2",
-              animation: "sysPulse 1.5s ease-in-out infinite",
-            }} />
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "10px", fontWeight: 700,
-              color: "#00dfb2", letterSpacing: "0.2em",
-              position: "relative", zIndex: 1
-            }}>SYS.SYNC</span>
-          </div>
-        </div>
       </div>
 
       {/* ─── CSS Keyframes & Micro-Interactions ─── */}
@@ -245,6 +204,65 @@ export default function VaultStats() {
         @keyframes slideGradient {
           0% { background-position: 0% 50%; }
           100% { background-position: 200% 50%; }
+        }
+
+        /* CSS Desktop/Tablet */
+        .cyber-value {
+          font-size: 26px;
+          letter-spacing: -0.04em;
+          padding-left: 42px; /* Seimbang dengan lebar ikon (32px + 10px gap) */
+        }
+        .stats-grid {
+          grid-template-columns: repeat(4, 1fr) auto;
+        }
+
+        @media (max-width: 1000px) {
+          .stats-grid { grid-template-columns: repeat(2, 1fr); padding-bottom: 20px; }
+          .cyber-stat-card { border-bottom: 1px solid rgba(255,255,255,0.05); }
+        }
+        
+        /* 📱 Khusus Tampilan Mobile (Centering & Redesign) */
+        @media (max-width: 600px) {
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr); 
+            gap: 16px; 
+            padding: 24px 16px;
+          }
+          .cyber-stat-card {
+            padding: 16px 10px !important;
+            border: 1px solid rgba(255,255,255,0.03) !important;
+            background: rgba(255,255,255,0.015);
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* Rata tengah */
+            text-align: center;
+          }
+          .stat-header {
+            justify-content: center;
+            margin-bottom: 12px !important;
+            gap: 6px !important;
+          }
+          .cyber-icon-box {
+            width: 20px !important; height: 20px !important;
+            border-radius: 6px !important;
+          }
+          .cyber-icon-box svg {
+            width: 12px; height: 12px;
+          }
+          .cyber-glow {
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+          }
+          .cyber-label {
+            font-size: 9px !important;
+            letter-spacing: 0.08em !important;
+          }
+          .cyber-value {
+            font-size: 20px !important;
+            padding-left: 0 !important; /* Hilangkan padding supaya rata tengah murni */
+          }
+          
         }
 
         /* Interaksi Hover (Cyber-Stat-Card) */

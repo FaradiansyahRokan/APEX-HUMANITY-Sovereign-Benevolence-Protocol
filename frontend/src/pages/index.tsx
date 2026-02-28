@@ -176,13 +176,13 @@ export default function Home() {
         backdropFilter: "blur(32px)", WebkitBackdropFilter: "blur(32px)",
         borderBottom: "1px solid var(--b0)",
       }}>
-        <div style={{
+        <div className="header-container" style={{
           maxWidth: "var(--mw)", margin: "0 auto",
-          height: "100%", padding: "0 40px",
+          height: "100%", padding: "0 20px",
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
           <Logo />
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {isConnected && nativeBalance !== undefined && (
               <div style={{
                 display: "flex", alignItems: "center", gap: "8px",
@@ -254,12 +254,30 @@ export default function Home() {
 
       {/* ═══ App (connected) ═══ */}
       {isConnected ? (
-        <div style={{
+        <div className="main-content" style={{
           maxWidth: "var(--mw)", margin: "0 auto",
-          padding: "48px 40px 120px",
+          padding: "48px 20px 120px",
         }}>
+          <style>{`
+            @media (max-width: 600px) {
+              .profile-card {
+                grid-template-columns: 1fr !important;
+                text-align: center !important;
+                justify-items: center !important;
+              }
+              .profile-balance {
+                text-align: center !important;
+                margin-top: 10px;
+                padding-top: 15px;
+                border-top: 1px solid rgba(255,255,255,0.05);
+                width: 100%;
+              }
+              .main-content { padding-top: 24px !important; }
+              .header-actions { display: none !important; } /* Hide balance in header on mobile to save space */
+            }
+          `}</style>
           {/* User identity card */}
-          <div className="rise" style={{
+          <div className="rise profile-card" style={{
             display: "grid",
             gridTemplateColumns: "auto 1fr auto",
             alignItems: "center", gap: "20px",
@@ -280,8 +298,8 @@ export default function Home() {
               </svg>
             </div>
 
-            <div>
-              <p className="label" style={{ marginBottom: "4px" }}>
+            <div className="profile-info">
+              <p className="label" style={{ marginBottom: "4px", wordBreak: "break-all" }}>
                 {address!.slice(0, 10)}…{address!.slice(-10)}
               </p>
               <p style={{ fontSize: "14px", fontWeight: 700, color: "var(--t0)" }}>
@@ -294,7 +312,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div style={{ textAlign: "right" }}>
+            <div className="profile-balance" style={{ textAlign: "right" }}>
               <p className="label" style={{ marginBottom: "4px" }}>APEX Balance</p>
               <p style={{
                 fontFamily: "'JetBrains Mono',monospace",
@@ -305,11 +323,15 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Tab Bar */}
-          <div style={{
+          {/* Tab Bar Container (Scrollable on Mobile) */}
+          <div className="tab-container" style={{
             display: "flex",
             borderBottom: "1px solid var(--b0)",
+            overflowX: "auto",
+            scrollbarWidth: "none", // Firefox
+            msOverflowStyle: "none", // IE
           }}>
+            <style>{`.tab-container::-webkit-scrollbar { display: none; }`}</style>
             {TABS.map((t) => {
               const active = tab === t.id;
               return (
@@ -323,6 +345,7 @@ export default function Home() {
                   color: active ? "var(--t0)" : "var(--t2)",
                   transition: "color 0.15s",
                   whiteSpace: "nowrap",
+                  flexShrink: 0, // Prevent tabs from squishing on mobile
                 }}>
                   {t.label}
                   {active && <span className="tab-underline" />}
