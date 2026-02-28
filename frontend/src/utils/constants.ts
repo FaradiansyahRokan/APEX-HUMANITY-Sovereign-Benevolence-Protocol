@@ -14,14 +14,14 @@ export const APEX_CHAIN = {
 } as const;
 
 export const ACTION_TYPES = [
-  { value: "FOOD_DISTRIBUTION", label: "Food Distribution", emoji: "🍚", baseScore: 80 },
-  { value: "MEDICAL_AID", label: "Medical Aid", emoji: "🏥", baseScore: 85 },
-  { value: "SHELTER_CONSTRUCTION", label: "Shelter Construction", emoji: "🏠", baseScore: 75 },
-  { value: "EDUCATION_SESSION", label: "Education Session", emoji: "📚", baseScore: 70 },
-  { value: "DISASTER_RELIEF", label: "Disaster Relief", emoji: "🆘", baseScore: 90 },
-  { value: "CLEAN_WATER_PROJECT", label: "Clean Water Project", emoji: "💧", baseScore: 78 },
-  { value: "MENTAL_HEALTH_SUPPORT", label: "Mental Health Support", emoji: "💚", baseScore: 72 },
-  { value: "ENVIRONMENTAL_ACTION", label: "Environmental Action", emoji: "🌱", baseScore: 65 },
+  { value: "FOOD_DISTRIBUTION", label: "Food Distribution", emoji: "❖", baseScore: 80 },
+  { value: "MEDICAL_AID", label: "Medical Aid", emoji: "⨹", baseScore: 85 },
+  { value: "SHELTER_CONSTRUCTION", label: "Shelter Construction", emoji: "⌂", baseScore: 75 },
+  { value: "EDUCATION_SESSION", label: "Education Session", emoji: "☾", baseScore: 70 },
+  { value: "DISASTER_RELIEF", label: "Disaster Relief", emoji: "⚠", baseScore: 90 },
+  { value: "CLEAN_WATER_PROJECT", label: "Clean Water Project", emoji: "≈", baseScore: 78 },
+  { value: "MENTAL_HEALTH_SUPPORT", label: "Mental Health Support", emoji: "♡", baseScore: 72 },
+  { value: "ENVIRONMENTAL_ACTION", label: "Environmental Action", emoji: "✧", baseScore: 65 },
 ];
 
 export const URGENCY_LEVELS = [

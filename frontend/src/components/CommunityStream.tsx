@@ -8,8 +8,8 @@ import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { motion, AnimatePresence } from "framer-motion";
 
 const getOracleUrl = () => {
-  // Langsung ambil dari .env tanpa menebak hostname
-  return process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
+    // Langsung ambil dari .env tanpa menebak hostname
+    return process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
 };
 
 const ORACLE_URL = getOracleUrl();
@@ -172,7 +172,7 @@ function VotingPanel({
                 await publicClient.waitForTransactionReceipt({ hash });
             }
             setClaimTx(hash);
-            setMsg(`✅ Reward berhasil diklaim!`);
+            setMsg(`Reward berhasil diklaim!`);
             onVoted();
         } catch (e: any) {
             setMsg(e.message?.slice(0, 120) || "Klaim gagal");
@@ -205,7 +205,7 @@ function VotingPanel({
                 setMsg(msg);
                 return;
             }
-            setMsg(data.outcome ? `✅ Outcome: ${data.outcome.toUpperCase()}` : "Vote recorded!");
+            setMsg(data.outcome ? `Outcome: ${data.outcome.toUpperCase()}` : "Vote recorded!");
             onVoted();
         } catch { setMsg("Network error"); }
         finally { setVoting(false); }
@@ -221,7 +221,11 @@ function VotingPanel({
                 display: "flex", flexDirection: "column", gap: "10px",
             }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "16px" }}>{approved ? "✅" : "❌"}</span>
+                    <div style={{
+                        width: "8px", height: "8px", borderRadius: "50%",
+                        background: approved ? "#00dfb2" : "#ff5050",
+                        boxShadow: `0 0 8px ${approved ? "rgba(0,223,178,0.5)" : "rgba(255,80,80,0.5)"}`
+                    }} />
                     <div>
                         <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: "12px", color: approved ? "#00dfb2" : "#ff5050" }}>
                             Community {vi.outcome.toUpperCase()}
@@ -237,7 +241,7 @@ function VotingPanel({
                     <div style={{ marginTop: "4px" }}>
                         {isProcessed || claimTx ? (
                             <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 600, textAlign: "center", padding: "8px", background: "rgba(255,255,255,0.03)", borderRadius: "8px" }}>
-                                Reward Claimed ✅
+                                Reward Claimed
                             </p>
                         ) : msg ? (
                             <p style={{ fontSize: "11px", color: "#00dfb2", fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 600, textAlign: "center" }}>{msg}</p>
@@ -274,8 +278,9 @@ function VotingPanel({
             background: "rgba(255,189,89,0.05)", border: "1px solid rgba(255,189,89,0.2)",
         }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                <p style={{ ...label10, color: "#ffbd59" }}>
-                    ⚠️ SATIN Ragu — Butuh Verifikasi Komunitas
+                <p style={{ ...label10, color: "#ffbd59", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ffbd59", boxShadow: "0 0 8px rgba(255,189,89,0.8)" }} />
+                    PENDING VERIFICATION
                 </p>
                 <span style={{
                     padding: "2px 8px", borderRadius: "20px", fontSize: "10px",
@@ -285,10 +290,10 @@ function VotingPanel({
                     fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
                 }}>
                     {isChampionAudit
-                        ? "👑 EXCLUSIVE CHAMPION AUDIT"
+                        ? "EXCLUSIVE AUDIT"
                         : vi.phase === 1
-                            ? `⚔️ CHAMPION+ · Terbuka ${Math.ceil(vi.phase2_in / 60)}m lagi`
-                            : "🌐 Semua Voter"}
+                            ? `CHAMPION+ · Terbuka ${Math.ceil(vi.phase2_in / 60)}m lagi`
+                            : "Terbuka · Semua Voter"}
                 </span>
             </div>
 
@@ -311,7 +316,7 @@ function VotingPanel({
                 </p>
             ) : hasVoted ? (
                 <p style={{ fontSize: "11px", color: "#00dfb2", fontFamily: "'JetBrains Mono',monospace", textAlign: "center", padding: "8px", background: "rgba(0,223,178,0.08)", borderRadius: "8px" }}>
-                    ✅ Kamu sudah memberikan vote
+                    Vote recorded
                 </p>
             ) : canVote ? (
                 <div style={{ display: "flex", gap: "8px" }}>
@@ -322,7 +327,7 @@ function VotingPanel({
                             color: voting ? "rgba(255,255,255,0.4)" : "#00dfb2",
                             fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 700,
                             cursor: voting ? "not-allowed" : "pointer", transition: "all 0.2s"
-                        }}>{voting ? "⏳ Processing..." : "✅ Approve"}</button>
+                        }}>{voting ? "Processing..." : "Approve"}</button>
                     <button onClick={() => handleVote("reject")} disabled={voting}
                         style={{
                             flex: 1, padding: "8px", borderRadius: "8px", border: "none",
@@ -330,7 +335,7 @@ function VotingPanel({
                             color: voting ? "rgba(255,255,255,0.4)" : "#ff8080",
                             fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 700,
                             cursor: voting ? "not-allowed" : "pointer", transition: "all 0.2s"
-                        }}>{voting ? "⏳ Processing..." : "❌ Reject"}</button>
+                        }}>{voting ? "Processing..." : "Reject"}</button>
                 </div>
             ) : (
                 <p style={{ fontSize: "11px", color: "rgba(255,189,89,0.6)", fontFamily: "'JetBrains Mono',monospace" }}>
@@ -375,7 +380,8 @@ function StreamCard({ entry, address, reputationScore, onVoted }: {
                                 background: "rgba(0,223,178,0.05)", border: "1px solid rgba(0,223,178,0.12)",
                                 fontSize: "9px", fontFamily: "'JetBrains Mono',monospace",
                                 color: "rgba(0,223,178,0.5)", fontWeight: 700,
-                            }}>📷 LIVE</span>
+                                display: "flex", alignItems: "center", gap: "4px"
+                            }}><div style={{ width: 4, height: 4, borderRadius: "50%", background: "#00dfb2" }} />LIVE</span>
                         )}
                         {entry.integrity_warnings?.length > 0 && entry.integrity_warnings.map((w, i) => (
                             <span key={i} style={{
@@ -383,7 +389,7 @@ function StreamCard({ entry, address, reputationScore, onVoted }: {
                                 background: "rgba(255,80,80,0.15)", border: "1px solid rgba(255,80,80,0.3)",
                                 fontSize: "9px", fontFamily: "'JetBrains Mono',monospace",
                                 color: "#ff8080", fontWeight: 700,
-                            }}>🚨 {w.replace(/_/g, " ").toUpperCase()}</span>
+                            }}>FLAG: {w.replace(/_/g, " ").toUpperCase()}</span>
                         ))}
                     </div>
                     <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", whiteSpace: "nowrap" as const, fontFamily: "'JetBrains Mono',monospace" }}>
@@ -464,8 +470,8 @@ function StreamCard({ entry, address, reputationScore, onVoted }: {
                         <div style={{
                             width: "80px", height: "80px", borderRadius: "10px", flexShrink: 0,
                             background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px",
-                        }}>📝</div>
+                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace"
+                        }}>NO_IMG</div>
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace", marginBottom: "4px" }}>
@@ -577,16 +583,18 @@ export default function CommunityStream({ address, reputationScore }: { address:
                 </div>
                 <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                     {pending.length > 0 && (
-                        <div style={{ padding: "6px 12px", borderRadius: "20px", background: "rgba(255,189,89,0.08)", border: "1px solid rgba(255,189,89,0.25)" }}>
+                        <div style={{ padding: "6px 12px", borderRadius: "20px", background: "rgba(255,189,89,0.08)", border: "1px solid rgba(255,189,89,0.25)", display: "flex", alignItems: "center", gap: "6px" }}>
+                            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ffbd59", boxShadow: "0 0 8px rgba(255,189,89,0.8)" }} />
                             <span style={{ fontSize: "11px", fontWeight: 700, color: "#ffbd59", fontFamily: "'JetBrains Mono',monospace" }}>
-                                ⚠️ {pending.length} perlu verifikasi
+                                {pending.length} perlu verifikasi
                             </span>
                         </div>
                     )}
                     {/* Rank badge */}
-                    <div style={{ padding: "6px 12px", borderRadius: "20px", background: "rgba(124,106,255,0.08)", border: "1px solid rgba(124,106,255,0.2)" }}>
+                    <div style={{ padding: "6px 12px", borderRadius: "20px", background: "rgba(124,106,255,0.08)", border: "1px solid rgba(124,106,255,0.2)", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#7c6aff" }} />
                         <span style={{ fontSize: "11px", fontWeight: 700, color: "#7c6aff", fontFamily: "'JetBrains Mono',monospace" }}>
-                            ⚔️ {rank.rank}
+                            {rank.rank}
                         </span>
                     </div>
                     <button onClick={fetchStream} style={{
@@ -623,7 +631,7 @@ export default function CommunityStream({ address, reputationScore }: { address:
 
             {loading ? (
                 <div style={{ textAlign: "center" as const, padding: "60px 0", opacity: 0.4 }}>
-                    <div style={{ fontSize: "24px", marginBottom: "8px" }}>⏳</div>
+                    <div style={{ width: "24px", height: "24px", margin: "0 auto 12px", border: "2px solid #00dfb2", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
                     <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)" }}>Memuat stream…</p>
                 </div>
             ) : filteredItems.length === 0 ? (
@@ -639,7 +647,7 @@ export default function CommunityStream({ address, reputationScore }: { address:
                         background: "rgba(124,106,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center",
                         border: "1px solid rgba(124,106,255,0.2)", boxShadow: "0 0 40px rgba(124,106,255,0.1) inset"
                     }}>
-                        <span style={{ fontSize: "32px", filter: "drop-shadow(0 0 10px rgba(124,106,255,0.4))" }}>✨</span>
+                        <div style={{ width: 16, height: 16, borderRadius: "50%", background: "linear-gradient(135deg,rgba(124,106,255,0.8),transparent)", opacity: 0.5 }} />
                     </div>
                     <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: "18px", color: "rgba(255,255,255,0.8)", marginBottom: "8px", position: "relative" }}>
                         Tidak Ada Aktivitas
@@ -669,6 +677,7 @@ export default function CommunityStream({ address, reputationScore }: { address:
 
             <style>{`
         @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
       `}</style>
         </div>
     );

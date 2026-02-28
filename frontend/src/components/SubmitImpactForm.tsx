@@ -24,9 +24,9 @@ interface Form {
 }
 
 const STEPS = [
-  { key: "uploading", label: "IPFS Upload", icon: "📁" },
-  { key: "oracle", label: "Oracle Verify", icon: "🔮" },
-  { key: "onchain", label: "On-chain Record", icon: "⛓️" },
+  { key: "uploading", label: "IPFS Upload", icon: "◫" },
+  { key: "oracle", label: "Oracle Verify", icon: "◉" },
+  { key: "onchain", label: "On-chain Record", icon: "☍" },
 ];
 
 const URGENCY_META: Record<string, { gradient: string; glow: string; bg: string; border: string }> = {
@@ -413,9 +413,9 @@ export default function SubmitImpactForm() {
             background: isCommunityReview ? "rgba(255,189,89,0.1)" : "rgba(0,223,178,0.1)",
             border: `1px solid ${isCommunityReview ? "rgba(255,189,89,0.25)" : "rgba(0,223,178,0.2)"}`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "26px",
+            fontSize: "26px", color: isCommunityReview ? "#ffbd59" : "#00dfb2",
             boxShadow: isCommunityReview ? "0 0 30px rgba(255,189,89,0.2)" : "0 0 30px rgba(0,223,178,0.2)",
-          }}>{isCommunityReview ? "⏳" : "✅"}</div>
+          }}>{isCommunityReview ? "⌬" : "✓"}</div>
 
           <div>
             <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff", marginBottom: "8px" }}>
@@ -457,7 +457,7 @@ export default function SubmitImpactForm() {
               fontSize: "11px", color: "rgba(255,189,89,0.8)", lineHeight: 1.7,
               fontFamily: "'JetBrains Mono',monospace",
             }}>
-              ⚠️ Integrity notes: {oracle.integrity_warnings.join(" · ")}
+              FLAG Integrity notes: {oracle.integrity_warnings.join(" · ")}
               {oracle.authenticity_penalty > 0 && (
                 <span style={{ display: "block", marginTop: "4px", opacity: 0.7 }}>
                   Score adjusted by −{(oracle.authenticity_penalty * 100).toFixed(0)}% due to integrity flags.
@@ -576,9 +576,9 @@ export default function SubmitImpactForm() {
             background: "rgba(255,189,89,0.1)",
             border: "1px solid rgba(255,189,89,0.25)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "26px",
+            fontSize: "26px", color: "#ffbd59",
             boxShadow: "0 0 30px rgba(255,189,89,0.2)",
-          }}>⏳</div>
+          }}>⌬</div>
           <div>
             <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff", marginBottom: "8px" }}>
               Submission Sedang Divoting
@@ -745,7 +745,7 @@ export default function SubmitImpactForm() {
                 onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.1)"}
                 onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.06)"}
               >
-                📍 Auto
+                ⌖ Auto
               </button>
             </div>
           </div>
@@ -766,7 +766,7 @@ export default function SubmitImpactForm() {
                   fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 700,
                   cursor: "pointer", transition: "all 0.15s",
                 }}>
-                📷 Kamera Langsung
+                ⦾ Kamera Langsung
                 <span style={{ display: "block", fontSize: "9px", fontWeight: 400, opacity: 0.6, marginTop: "2px" }}>Skor autentisitas +bonus</span>
               </button>
               {/* Gallery Upload */}
@@ -779,7 +779,7 @@ export default function SubmitImpactForm() {
                   fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 600,
                   cursor: "pointer", transition: "all 0.15s", position: "relative" as const,
                 }}>
-                📁 Upload Galeri
+                ◫ Upload Galeri
                 <span style={{
                   display: "block", fontSize: "9px", fontWeight: 400,
                   opacity: 0.6, marginTop: "2px", color: "rgba(255,189,89,0.7)",
@@ -810,7 +810,7 @@ export default function SubmitImpactForm() {
                       fontFamily: "'Plus Jakarta Sans',sans-serif",
                       fontWeight: 800, fontSize: "13px", color: "#0a0510",
                       cursor: "pointer", boxShadow: "0 4px 16px rgba(0,223,178,0.4)",
-                    }}>📸 Ambil Foto</button>
+                    }}>⦾ Ambil Foto</button>
                   <button type="button" onClick={() => { stopCamera(); setCaptureMode(null); }}
                     style={{
                       padding: "10px 16px", borderRadius: "50px", border: "1px solid rgba(255,80,80,0.3)",
@@ -854,7 +854,7 @@ export default function SubmitImpactForm() {
                     color: captureMode === "camera" ? "#00dfb2" : "#ffbd59",
                     letterSpacing: "0.06em",
                   }}>
-                    {captureMode === "camera" ? "✅ LIVE CAPTURE" : "📁 GALERI"}
+                    {captureMode === "camera" ? "✓ LIVE CAPTURE" : "◫ GALERI"}
                   </div>
                 </div>
               )}
@@ -887,7 +887,7 @@ export default function SubmitImpactForm() {
 
           {!file && !cameraActive && (
             <div style={{ padding: "24px 22px", textAlign: "center" as const, opacity: 0.4 }}>
-              <div style={{ fontSize: "24px", marginBottom: "6px" }}>📷</div>
+              <div style={{ width: 24, height: 24, margin: "0 auto 6px", border: "2px dashed rgba(255,255,255,0.4)", borderRadius: 4 }}></div>
               <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>Pilih kamera atau galeri di atas</p>
             </div>
           )}
