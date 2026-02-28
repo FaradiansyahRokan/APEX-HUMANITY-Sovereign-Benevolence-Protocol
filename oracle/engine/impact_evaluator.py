@@ -593,11 +593,11 @@ class ImpactEvaluator:
         logger.info(f"Oracle Address:     {self.signer.oracle_address}")
 
     # ------------------------------------------------------------------
-    def evaluate(self, metadata, image_bytes: Optional[bytes] = None):
+    def evaluate(self, metadata, image_bytes: Optional[bytes] = None, penalty: float = 0.0):
         if type(metadata).__name__ == "EvidenceBundle":
         
-            return _evaluate_evidence_bundle(self, metadata, image_bytes)
-        return self._evaluate_internal(metadata, image_bytes)
+            return _evaluate_evidence_bundle(self, metadata, image_bytes, penalty)
+        return self._evaluate_internal(metadata, image_bytes, penalty)
 
 
     # ------------------------------------------------------------------
@@ -605,6 +605,7 @@ class ImpactEvaluator:
         self,
         metadata:    ImpactMetadata,
         image_bytes: Optional[bytes] = None,
+        penalty:     float = 0.0,
     ) -> ImpactMetadata:
         """Core evaluation pipeline. Mutates and returns the metadata object."""
         logger.info(f"[{metadata.event_id}] Starting evaluation pipeline...")
@@ -652,7 +653,15 @@ class ImpactEvaluator:
             logger.info(f"[{metadata.event_id}] ZKP verified successfully.")
 
         # ── Step 4: Impact Score ────────────────────────────────────────
-        impact_score       = self.score_calculator.calculate(metadata, ai_confidence)
+        raw_impact_score   = self.score_calculator.calculate(metadata, ai_confidence)
+        
+        if penalty > 0:
+            impact_score = round(raw_impact_score * (1.0 - penalty), 4)
+            impact_score = max(0.0, impact_score)
+            logger.info(f"[{metadata.event_id}] Applied penalty {penalty:.2%}: {raw_impact_score} -> {impact_score}")
+        else:
+            impact_score = raw_impact_score
+            
         metadata.impact_score = impact_score
         logger.info(f"[{metadata.event_id}] Impact Score: {impact_score}")
 
@@ -675,10 +684,15 @@ class ImpactEvaluator:
         impact_scaled = int(round(impact_score * 100))  # tetap untuk reputation
 
         # Token pakai curve non-linear, max 50 GOOD per event
-        score_normalized = impact_score / 100.0
-        token_reward     = 5.0 + (score_normalized ** 1.5) * 45.0
-        # v1.2.0 FIX: hard cap at MAX_TOKEN_REWARD_APEX to prevent runaway minting
-        token_reward     = min(token_reward, self.score_calculator.MAX_TOKEN_REWARD_APEX)
+        if penalty >= 0.60:
+            token_reward = 0.0
+            logger.warning(f"[{metadata.event_id}] REWARD_GATE: Token reward set to 0. penalty={penalty:.2%}")
+        else:
+            score_normalized = impact_score / 100.0
+            token_reward     = 5.0 + (score_normalized ** 1.5) * 45.0
+            # v1.2.0 FIX: hard cap at MAX_TOKEN_REWARD_APEX to prevent runaway minting
+            token_reward     = min(token_reward, self.score_calculator.MAX_TOKEN_REWARD_APEX)
+            
         token_reward_wei = int(token_reward * 10 ** 18)  # convert to 18 decimals
 
         zk_proof_hash = _keccak256(
@@ -1113,6 +1127,7 @@ def _evaluate_evidence_bundle(
     evaluator_instance: "ImpactEvaluator",
     evidence:           EvidenceBundle,
     image_bytes:        Optional[bytes] = None,
+    penalty:            float = 0.0,
 ) -> OraclePayload:
     """
     New API path: EvidenceBundle in → OraclePayload out.
@@ -1120,7 +1135,7 @@ def _evaluate_evidence_bundle(
     """
     event_id = str(uuid.uuid4())
     metadata = evidence.to_impact_metadata(event_id)
-    result: ImpactMetadata = evaluator_instance._evaluate_internal(metadata, image_bytes)
+    result: ImpactMetadata = evaluator_instance._evaluate_internal(metadata, image_bytes, penalty)
 
     if result.verification_status != VerificationStatus.VERIFIED:
         raise EvaluationFailedError(

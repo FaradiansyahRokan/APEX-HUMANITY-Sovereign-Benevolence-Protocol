@@ -120,7 +120,7 @@ Jawab HANYA dalam JSON murni (tanpa markdown, tanpa penjelasan di luar JSON):
     "best_estimate": <float — nilaimu yang paling masuk akal>
   }},
   "confidence": <integer 0-100>,
-  "fraud_indicators": ["list hal mencurigakan jika ada, kosong jika bersih"],
+  "fraud_indicators": ["isi HANYA jika ada penipuan/manipulasi (misal foto di kafe tapi klaim bencana alam). JANGAN isi jika sekadar jumlah kurang tampak. Kosongkan [] jika foto aman dan nyambung"],
   "reasoning": "penjelasan singkat deduksimu"
 }}
 

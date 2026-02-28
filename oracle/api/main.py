@@ -447,7 +447,7 @@ async def verify_impact(
 
     # ── STEP 6: Oracle Evaluation ──────────────────────────────────────────────
     try:
-        payload: OraclePayload = evaluator.evaluate(evidence, image_bytes=image_bytes)
+        payload: OraclePayload = evaluator.evaluate(evidence, image_bytes=image_bytes, penalty=total_penalty)
 
     except EvaluationFailedError as eval_err:
         # Low score → community review
@@ -502,28 +502,6 @@ async def verify_impact(
             "contract_args":          None,
             "processing_time_ms":     round((time.perf_counter() - t_start) * 1000, 2),
         }
-
-    # ── STEP 7: Apply penalty to score ────────────────────────────────────────
-    original_score = payload.impact_score
-    if total_penalty > 0:
-        adjusted_score       = round(original_score * (1.0 - total_penalty), 4)
-        payload.impact_score = max(0.0, adjusted_score)
-        log.info(
-            f"[SCORE] {original_score:.2f} × (1-{total_penalty:.2%}) "
-            f"= {payload.impact_score:.2f}"
-        )
-
-    # ── STEP 8: Apply Reward Gate ──────────────────────────────────────────────
-    # v2.0 FIX: Reward harus nol jika penalty terlalu tinggi
-    # Token reward dihitung ulang dari adjusted score, bukan original
-    if reward_gated:
-        payload.token_reward = 0.0
-        log.warning(f"[REWARD_GATE] Token reward set to 0 — submission masuk community review")
-    else:
-        # Recalculate token reward from adjusted (penalized) score
-        score_normalized     = payload.impact_score / 100.0
-        payload.token_reward = round(5.0 + (score_normalized ** 1.5) * 45.0, 4)
-        payload.token_reward = min(payload.token_reward, 100.0)
 
     processing_ms = round((time.perf_counter() - t_start) * 1000, 2)
 
