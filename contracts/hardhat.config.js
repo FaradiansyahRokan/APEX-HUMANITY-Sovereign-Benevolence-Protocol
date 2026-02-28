@@ -17,8 +17,8 @@ module.exports = {
     },
 
     // ─── APEX NETWORK (L1 Sovereign) ─────────────────────────────────────────
-    apex_local: {
-  url: "http://127.0.0.1:9654/ext/bc/2hGMsKi551C3hgc27H3ryiktbdJmbNxujbXZ7u1NprGLN7Aupi/rpc",
+    apexnetwork_fuji: {
+  url: "http://127.0.0.1:9650/ext/bc/2J8FS94wi2HBQAiqcvVkJUeodDCHL3cRTPgcfgoFso5h8NSvaE/rpc",
   chainId: 6969,
   accounts: process.env.APEX_ADMIN_PRIVATE_KEY ? [process.env.APEX_ADMIN_PRIVATE_KEY] : [],
   gasPrice: 25000000000,

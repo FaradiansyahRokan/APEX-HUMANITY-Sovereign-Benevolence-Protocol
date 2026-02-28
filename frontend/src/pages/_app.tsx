@@ -9,16 +9,16 @@ import "../styles/globals.css";
 
 // Dynamic RPC/AppUrl detection for Mobile support
 const getDynamicConfig = () => {
-  if (typeof window === "undefined") return { rpc: "http://127.0.0.1:9654", url: "http://localhost:3000" };
+  if (typeof window === "undefined") return { rpc: "http://127.0.0.1:9650", url: "http://localhost:3000" };
   const host = window.location.hostname;
   const isLocal = host === "localhost" || host === "127.0.0.1";
   const protocol = window.location.protocol;
   const port = window.location.port ? `:${window.location.port}` : "";
 
   // Use port 9655 for mobile proxy if not local, else 9654
-  const rpcPort = isLocal ? "9654" : "9655";
+  const rpcPort = isLocal ? "9650" : "9655";
   const rpcHost = isLocal ? "127.0.0.1" : host;
-  const rpcUrl = `http://${rpcHost}:${rpcPort}/ext/bc/2hGMsKi551C3hgc27H3ryiktbdJmbNxujbXZ7u1NprGLN7Aupi/rpc`;
+  const rpcUrl = `https://large-protocols-kick-nursing.trycloudflare.com/ext/bc/2J8FS94wi2HBQAiqcvVkJUeodDCHL3cRTPgcfgoFso5h8NSvaE/rpc`;
   const appUrl = `${protocol}//${host}${port}`;
 
   return { rpc: rpcUrl, url: appUrl };
