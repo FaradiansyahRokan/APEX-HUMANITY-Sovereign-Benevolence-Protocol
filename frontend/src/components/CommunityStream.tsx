@@ -5,6 +5,7 @@ import { useWriteContract, usePublicClient, useReadContract } from "wagmi";
 import { pad } from "viem";
 import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS, getRank } from "../utils/constants";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
+import { motion, AnimatePresence } from "framer-motion";
 
 const ORACLE_URL = process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
 const ORACLE_KEY = process.env.NEXT_PUBLIC_SATIN_API_KEY || "apex-dev-key";
@@ -27,6 +28,7 @@ interface StreamEntry {
     source: string; image_base64: string | null;
     integrity_warnings: string[];
     needs_community_review: boolean;
+    needs_champion_audit?: boolean;
     submitted_at: number;
     vote_info?: VoteInfo;
 }
@@ -119,7 +121,8 @@ function VotingPanel({
     const isOwner = address.toLowerCase() === entry.volunteer_address.toLowerCase();
     const hasVoted = vi.voters?.map((v: string) => v.toLowerCase()).includes(address.toLowerCase());
     const isChampion = reputationScore >= 500;
-    const canVote = vi.phase === 2 || isChampion;
+    const isChampionAudit = entry.needs_champion_audit;
+    const canVote = isChampionAudit ? isChampion : (vi.phase === 2 || isChampion);
     const total = vi.approve + vi.reject || 1;
     const approveP = Math.round((vi.approve / total) * 100);
     const rejectP = 100 - approveP;
@@ -271,14 +274,16 @@ function VotingPanel({
                 </p>
                 <span style={{
                     padding: "2px 8px", borderRadius: "20px", fontSize: "10px",
-                    background: vi.phase === 1 ? "rgba(124,106,255,0.12)" : "rgba(0,223,178,0.08)",
-                    border: `1px solid ${vi.phase === 1 ? "rgba(124,106,255,0.3)" : "rgba(0,223,178,0.2)"}`,
-                    color: vi.phase === 1 ? "#7c6aff" : "#00dfb2",
+                    background: (vi.phase === 1 || isChampionAudit) ? "rgba(124,106,255,0.12)" : "rgba(0,223,178,0.08)",
+                    border: `1px solid ${(vi.phase === 1 || isChampionAudit) ? "rgba(124,106,255,0.3)" : "rgba(0,223,178,0.2)"}`,
+                    color: (vi.phase === 1 || isChampionAudit) ? "#7c6aff" : "#00dfb2",
                     fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
                 }}>
-                    {vi.phase === 1
-                        ? `⚔️ CHAMPION+ · Terbuka ${Math.ceil(vi.phase2_in / 60)}m lagi`
-                        : "🌐 Semua Voter"}
+                    {isChampionAudit
+                        ? "👑 EXCLUSIVE CHAMPION AUDIT"
+                        : vi.phase === 1
+                            ? `⚔️ CHAMPION+ · Terbuka ${Math.ceil(vi.phase2_in / 60)}m lagi`
+                            : "🌐 Semua Voter"}
                 </span>
             </div>
 
@@ -308,21 +313,25 @@ function VotingPanel({
                     <button onClick={() => handleVote("approve")} disabled={voting}
                         style={{
                             flex: 1, padding: "8px", borderRadius: "8px", border: "none",
-                            background: "rgba(0,223,178,0.12)", color: "#00dfb2",
+                            background: voting ? "rgba(255,255,255,0.05)" : "rgba(0,223,178,0.12)",
+                            color: voting ? "rgba(255,255,255,0.4)" : "#00dfb2",
                             fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 700,
-                            cursor: voting ? "not-allowed" : "pointer",
-                        }}>✅ Approve</button>
+                            cursor: voting ? "not-allowed" : "pointer", transition: "all 0.2s"
+                        }}>{voting ? "⏳ Processing..." : "✅ Approve"}</button>
                     <button onClick={() => handleVote("reject")} disabled={voting}
                         style={{
                             flex: 1, padding: "8px", borderRadius: "8px", border: "none",
-                            background: "rgba(255,80,80,0.10)", color: "#ff8080",
+                            background: voting ? "rgba(255,255,255,0.05)" : "rgba(255,80,80,0.10)",
+                            color: voting ? "rgba(255,255,255,0.4)" : "#ff8080",
                             fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 700,
-                            cursor: voting ? "not-allowed" : "pointer",
-                        }}>❌ Reject</button>
+                            cursor: voting ? "not-allowed" : "pointer", transition: "all 0.2s"
+                        }}>{voting ? "⏳ Processing..." : "❌ Reject"}</button>
                 </div>
             ) : (
                 <p style={{ fontSize: "11px", color: "rgba(255,189,89,0.6)", fontFamily: "'JetBrains Mono',monospace" }}>
-                    Voting terbuka untuk CHAMPION+ saja saat ini. Tunggu {Math.ceil(vi.phase2_in / 60)} menit lagi untuk vote bebas.
+                    {isChampionAudit
+                        ? "Voting EKSLUSIF hanya untuk akun dengan reputasi CHAMPION+ (Score ≥ 500)."
+                        : `Voting terbuka untuk CHAMPION+ saja saat ini. Tunggu ${Math.ceil(vi.phase2_in / 60)} menit lagi untuk vote bebas.`}
                 </p>
             )}
         </div>
@@ -334,6 +343,7 @@ function StreamCard({ entry, address, reputationScore, onVoted }: {
 }) {
     const flagged = entry.needs_community_review;
     const accentBorder = flagged ? "rgba(255,189,89,0.22)" : "rgba(255,255,255,0.07)";
+    const [isImageExpanded, setIsImageExpanded] = useState(false);
 
     return (
         <div style={{
@@ -362,6 +372,14 @@ function StreamCard({ entry, address, reputationScore, onVoted }: {
                                 color: "rgba(0,223,178,0.5)", fontWeight: 700,
                             }}>📷 LIVE</span>
                         )}
+                        {entry.integrity_warnings?.length > 0 && entry.integrity_warnings.map((w, i) => (
+                            <span key={i} style={{
+                                padding: "2px 8px", borderRadius: "6px",
+                                background: "rgba(255,80,80,0.15)", border: "1px solid rgba(255,80,80,0.3)",
+                                fontSize: "9px", fontFamily: "'JetBrains Mono',monospace",
+                                color: "#ff8080", fontWeight: 700,
+                            }}>🚨 {w.replace(/_/g, " ").toUpperCase()}</span>
+                        ))}
                     </div>
                     <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", whiteSpace: "nowrap" as const, fontFamily: "'JetBrains Mono',monospace" }}>
                         {timeAgo(entry.submitted_at)}
@@ -371,11 +389,72 @@ function StreamCard({ entry, address, reputationScore, onVoted }: {
                 {/* Photo + description row */}
                 <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
                     {entry.image_base64 ? (
-                        <img
-                            src={`data:image/jpeg;base64,${entry.image_base64}`}
-                            alt="Evidence"
-                            style={{ width: "80px", height: "80px", borderRadius: "10px", objectFit: "cover", flexShrink: 0, border: "1px solid rgba(255,255,255,0.08)" }}
-                        />
+                        <>
+                            {/* Expandable Image Thumbnail */}
+                            <motion.div
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => setIsImageExpanded(true)}
+                                style={{ cursor: "zoom-in", flexShrink: 0 }}
+                            >
+                                <img
+                                    src={`data:image/jpeg;base64,${entry.image_base64}`}
+                                    alt="Evidence Thumbnail"
+                                    style={{
+                                        width: "80px", height: "80px", borderRadius: "10px", objectFit: "cover",
+                                        border: "1px solid rgba(255,255,255,0.08)",
+                                        boxShadow: "0 4px 12px rgba(0,0,0,0.2)"
+                                    }}
+                                />
+                            </motion.div>
+
+                            {/* Fullscreen Image Overlay */}
+                            <AnimatePresence>
+                                {isImageExpanded && (
+                                    <motion.div
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        exit={{ opacity: 0 }}
+                                        onClick={() => setIsImageExpanded(false)}
+                                        style={{
+                                            position: "fixed", inset: 0, zIndex: 9999,
+                                            background: "rgba(3,8,14,0.9)", backdropFilter: "blur(8px)",
+                                            display: "flex", alignItems: "center", justifyContent: "center",
+                                            padding: "20px", cursor: "zoom-out"
+                                        }}
+                                    >
+                                        <motion.img
+                                            initial={{ scale: 0.9, y: 20 }}
+                                            animate={{ scale: 1, y: 0 }}
+                                            exit={{ scale: 0.9, y: 20 }}
+                                            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                                            src={`data:image/jpeg;base64,${entry.image_base64}`}
+                                            alt="Expanded Evidence"
+                                            style={{
+                                                maxWidth: "100%", maxHeight: "90vh",
+                                                borderRadius: "16px",
+                                                boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+                                                border: "1px solid rgba(255,255,255,0.1)",
+                                                objectFit: "contain"
+                                            }}
+                                            onClick={(e) => e.stopPropagation()} // Prevent closing when clicking the image itself
+                                        />
+                                        <button
+                                            onClick={() => setIsImageExpanded(false)}
+                                            style={{
+                                                position: "absolute", top: "30px", right: "30px",
+                                                width: "44px", height: "44px", borderRadius: "50%",
+                                                background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+                                                color: "#fff", fontSize: "20px", display: "flex", alignItems: "center", justifyContent: "center",
+                                                cursor: "pointer", backdropFilter: "blur(4px)"
+                                            }}
+                                        >
+                                            ✕
+                                        </button>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </>
                     ) : (
                         <div style={{
                             width: "80px", height: "80px", borderRadius: "10px", flexShrink: 0,
@@ -434,6 +513,7 @@ export default function CommunityStream({ address, reputationScore }: { address:
     const [items, setItems] = useState<StreamEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [lastRefresh, setLastRefresh] = useState(Date.now());
+    const [filter, setFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
     const rank = getRank(reputationScore);
 
     const fetchStream = useCallback(async () => {
@@ -456,6 +536,27 @@ export default function CommunityStream({ address, reputationScore }: { address:
     }, [fetchStream]);
 
     const pending = items.filter(i => i.needs_community_review && !i.vote_info?.outcome);
+
+    // Apply filtering and sorting logic
+    const filteredItems = items
+        .filter(entry => {
+            if (filter === "all") return true;
+            if (filter === "pending") return entry.needs_community_review && !entry.vote_info?.outcome;
+            if (filter === "approved") return entry.vote_info?.outcome === "approved";
+            if (filter === "rejected") return entry.vote_info?.outcome === "rejected";
+            return true;
+        })
+        .sort((a, b) => {
+            // Sort Strategy 1: Always put pending votes for the community ON TOP
+            const aPending = a.needs_community_review && !a.vote_info?.outcome;
+            const bPending = b.needs_community_review && !b.vote_info?.outcome;
+
+            if (aPending && !bPending) return -1;
+            if (!aPending && bPending) return 1;
+
+            // Sort Strategy 2: Default to newest first (highest timestamp)
+            return b.submitted_at - a.submitted_at;
+        });
 
     return (
         <div style={{ maxWidth: "680px" }}>
@@ -491,6 +592,22 @@ export default function CommunityStream({ address, reputationScore }: { address:
                 </div>
             </div>
 
+            {/* Filter Buttons */}
+            <div style={{ display: "flex", gap: "10px", marginBottom: "20px", overflowX: "auto", paddingBottom: "4px" }}>
+                {["all", "pending", "approved", "rejected"].map(f => (
+                    <button key={f} onClick={() => setFilter(f as any)} style={{
+                        padding: "6px 14px", borderRadius: "20px", border: "1px solid",
+                        borderColor: filter === f ? "rgba(0,223,178,0.4)" : "rgba(255,255,255,0.1)",
+                        background: filter === f ? "rgba(0,223,178,0.1)" : "rgba(255,255,255,0.03)",
+                        color: filter === f ? "#00dfb2" : "rgba(255,255,255,0.5)",
+                        fontSize: "12px", fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 600,
+                        cursor: "pointer", transition: "all 0.2s", whiteSpace: "nowrap"
+                    }}>
+                        {f === "all" ? "Semua" : f === "pending" ? "Butuh Vote" : f === "approved" ? "Disetujui" : "Ditolak"}
+                    </button>
+                ))}
+            </div>
+
             {/* Live indicator */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
                 <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#ff5050", boxShadow: "0 0 8px #ff5050", animation: "pulse 2s ease-in-out infinite" }} />
@@ -504,17 +621,44 @@ export default function CommunityStream({ address, reputationScore }: { address:
                     <div style={{ fontSize: "24px", marginBottom: "8px" }}>⏳</div>
                     <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)" }}>Memuat stream…</p>
                 </div>
-            ) : items.length === 0 ? (
-                <div style={{ textAlign: "center" as const, padding: "60px 0", opacity: 0.4 }}>
-                    <div style={{ fontSize: "32px", marginBottom: "10px" }}>🌊</div>
-                    <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: "15px", color: "rgba(255,255,255,0.5)", marginBottom: "6px" }}>Belum ada aktivitas</p>
-                    <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.25)" }}>Submit proof pertamamu untuk memulai stream komunitas</p>
+            ) : filteredItems.length === 0 ? (
+                <div style={{
+                    padding: "60px 40px", textAlign: "center", borderRadius: "24px",
+                    background: "linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
+                    border: "1px dashed rgba(255,255,255,0.1)",
+                    position: "relative", overflow: "hidden"
+                }}>
+                    <div style={{ position: "absolute", inset: "-50%", background: "radial-gradient(circle, rgba(124,106,255,0.05) 0%, transparent 60%)", pointerEvents: "none" }} />
+                    <div style={{
+                        width: "80px", height: "80px", margin: "0 auto 20px", borderRadius: "50%",
+                        background: "rgba(124,106,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1px solid rgba(124,106,255,0.2)", boxShadow: "0 0 40px rgba(124,106,255,0.1) inset"
+                    }}>
+                        <span style={{ fontSize: "32px", filter: "drop-shadow(0 0 10px rgba(124,106,255,0.4))" }}>✨</span>
+                    </div>
+                    <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: "18px", color: "rgba(255,255,255,0.8)", marginBottom: "8px", position: "relative" }}>
+                        Tidak Ada Aktivitas
+                    </p>
+                    <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", lineHeight: 1.6, maxWidth: "300px", margin: "0 auto", position: "relative" }}>
+                        {filter === "all" ? "Belum ada impact proofs yang dikirimkan oleh komunitas." : "Tidak ada aktivitas yang sesuai dengan filter ini."}
+                    </p>
                 </div>
             ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    {items.map(entry => (
-                        <StreamCard key={entry.event_id} entry={entry} address={address} reputationScore={reputationScore} onVoted={fetchStream} />
-                    ))}
+                    <AnimatePresence mode="popLayout">
+                        {filteredItems.map((entry, index) => (
+                            <motion.div
+                                key={entry.event_id}
+                                layout
+                                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, filter: "blur(8px)" }}
+                                transition={{ duration: 0.3, delay: index * 0.05 }}
+                            >
+                                <StreamCard entry={entry} address={address} reputationScore={reputationScore} onVoted={fetchStream} />
+                            </motion.div>
+                        ))}
+                    </AnimatePresence>
                 </div>
             )}
 

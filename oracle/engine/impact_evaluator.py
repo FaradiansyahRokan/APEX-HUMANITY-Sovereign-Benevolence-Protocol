@@ -16,6 +16,12 @@ Fixes:
 
 from __future__ import annotations
 
+class EvaluationFailedError(RuntimeError):
+    def __init__(self, message: str, impact_score: float, ai_confidence: float):
+        super().__init__(message)
+        self.impact_score = impact_score
+        self.ai_confidence = ai_confidence
+
 import hashlib
 import hmac
 import json
@@ -599,12 +605,6 @@ class ImpactEvaluator:
                 f"objects: {cv_result.get('detected_objects', [])}"
             )
 
-            if img_confidence < 0.25:
-                return self._reject(
-                    metadata,
-                    f"Image verification confidence too low: {img_confidence:.2%} (min 25%)",
-                )
-
             # Image can boost above the 1.0 baseline but a weak image
             # won't tank a well-described, GPS-confirmed submission.
             ai_confidence = img_confidence
@@ -613,7 +613,6 @@ class ImpactEvaluator:
                 f"[{metadata.event_id}] No image provided — "
                 f"text/GPS-only submission (ai_confidence=1.0)"
             )
-
 
         metadata.ai_confidence = ai_confidence
 
@@ -629,12 +628,14 @@ class ImpactEvaluator:
         logger.info(f"[{metadata.event_id}] Impact Score: {impact_score}")
 
         MIN_SCORE_THRESHOLD = 30.0
+        reasons = []
+        if image_bytes and ai_confidence < 0.25:
+            reasons.append(f"Image verification confidence too low: {ai_confidence:.2%} (min 25%)")
         if impact_score < MIN_SCORE_THRESHOLD:
-            return self._reject(
-                metadata,
-                f"Impact score {impact_score:.2f} below minimum threshold {MIN_SCORE_THRESHOLD} "
-                f"(scaled: {int(impact_score * 100)} < 3000 required by contract)"
-            )
+            reasons.append(f"Impact score {impact_score:.2f} below minimum threshold {MIN_SCORE_THRESHOLD} (scaled: {int(impact_score * 100)} < 3000 required by contract)")
+        
+        if reasons:
+            return self._reject(metadata, " | ".join(reasons), keep_score=True)
 
         # ── Step 5: Cryptographic Hash + Oracle Signature ───────────────
         event_hash         = self._compute_event_hash(metadata)
@@ -862,10 +863,11 @@ class ImpactEvaluator:
             return False
 
     # ------------------------------------------------------------------
-    def _reject(self, metadata: ImpactMetadata, reason: str) -> ImpactMetadata:
+    def _reject(self, metadata: ImpactMetadata, reason: str, keep_score: bool = False) -> ImpactMetadata:
         metadata.verification_status = VerificationStatus.REJECTED
         metadata.rejection_reason    = reason
-        metadata.impact_score        = 0.0
+        if not keep_score:
+            metadata.impact_score        = 0.0
         logger.warning(f"[{metadata.event_id}] ❌ REJECTED — {reason}")
         return metadata
 
@@ -1092,8 +1094,10 @@ def _evaluate_evidence_bundle(
     result: ImpactMetadata = evaluator_instance._evaluate_internal(metadata, image_bytes)
 
     if result.verification_status != VerificationStatus.VERIFIED:
-        raise RuntimeError(
-            f"Insufficient impact: {result.rejection_reason or result.verification_status.value}"
+        raise EvaluationFailedError(
+            f"Insufficient impact: {result.rejection_reason or result.verification_status.value}",
+            result.impact_score,
+            result.ai_confidence
         )
 
     sig_data = json.loads(result.oracle_signature)

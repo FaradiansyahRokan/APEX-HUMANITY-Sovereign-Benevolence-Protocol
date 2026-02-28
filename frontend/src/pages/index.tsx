@@ -15,6 +15,23 @@ import Badges from "@/components/Badges";
 import P2PTransfer from "@/components/P2ptransfer";
 import CommunityStream from "@/components/CommunityStream";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
+
+// Helper component for counting up numbers smoothly
+function AnimatedNumber({ value, isFloat = false }: { value: number, isFloat?: boolean }) {
+  const mv = useMotionValue(0);
+  const formatted = useTransform(mv, (latest) => {
+    if (isFloat) return latest.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return Math.round(latest).toLocaleString();
+  });
+
+  useEffect(() => {
+    const controls = animate(mv, value, { duration: 1.5, ease: "easeOut" });
+    return controls.stop;
+  }, [value, mv]);
+
+  return <motion.span>{formatted}</motion.span>;
+}
 
 type TabId = "submit" | "profile" | "feed" | "badges" | "leaderboard" | "transfer" | "stream";
 
@@ -273,7 +290,7 @@ export default function Home() {
                   fontFamily: "'JetBrains Mono',monospace",
                   color: "var(--mi)",
                   textShadow: "0 0 16px var(--mi-glow)",
-                }}>{score.toLocaleString()}</span>
+                }}><AnimatedNumber value={score} /></span>
               </p>
             </div>
 
@@ -284,7 +301,7 @@ export default function Home() {
                 fontSize: "18px", fontWeight: 600,
                 color: "var(--go)",
                 textShadow: "0 0 16px var(--go-glow)",
-              }}>{apexFmt}</p>
+              }}><AnimatedNumber value={nativeBalance ? Number(nativeBalance.formatted) : 0} isFloat={true} /></p>
             </div>
           </div>
 
@@ -314,17 +331,26 @@ export default function Home() {
             })}
           </div>
 
-          {/* Content — wrapped in ErrorBoundary for graceful Oracle/wallet failures */}
-          <div className="rise" style={{ paddingTop: "40px" }}>
-            <ErrorBoundary context={tab}>
-              {tab === "submit" && <SubmitImpactForm />}
-              {tab === "profile" && <div style={{ maxWidth: "520px" }}><ReputationCard address={address!} reputationScore={score} /></div>}
-              {tab === "stream" && <CommunityStream address={address!} reputationScore={score} />}
-              {tab === "feed" && <ImpactFeed />}
-              {tab === "badges" && <Badges address={address!} />}
-              {tab === "leaderboard" && <Leaderboard />}
-              {tab === "transfer" && <P2PTransfer address={address!} />}
-            </ErrorBoundary>
+          <div style={{ paddingTop: "40px", minHeight: "60vh" }}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={tab}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.25, ease: "easeInOut" }}
+              >
+                <ErrorBoundary context={tab}>
+                  {tab === "submit" && <SubmitImpactForm />}
+                  {tab === "profile" && <div style={{ maxWidth: "520px" }}><ReputationCard address={address!} reputationScore={score} /></div>}
+                  {tab === "stream" && <CommunityStream address={address!} reputationScore={score} />}
+                  {tab === "feed" && <ImpactFeed />}
+                  {tab === "badges" && <Badges address={address!} />}
+                  {tab === "leaderboard" && <Leaderboard />}
+                  {tab === "transfer" && <P2PTransfer address={address!} />}
+                </ErrorBoundary>
+              </motion.div>
+            </AnimatePresence>
           </div>
         </div>
       ) : (

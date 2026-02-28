@@ -55,6 +55,7 @@ from engine.impact_evaluator import (
     ImpactEvaluator,
     OraclePayload,
     VerificationStatus,
+    EvaluationFailedError,
 )
 from engine.fraud_detector import FraudDetector
 
@@ -347,6 +348,12 @@ async def verify_impact(
 
     t_start = time.perf_counter()
 
+    if redis_client.get(f"satin:banned:{body.volunteer_address.lower()}"):
+        raise HTTPException(
+            status_code=403, 
+            detail="Address is BANNED due to consecutive fraudulent/rejected submissions."
+        )
+
     # Decode base64 image if sent from frontend
     image_bytes: Optional[bytes] = None
     if body.image_base64:
@@ -398,6 +405,17 @@ async def verify_impact(
 
         integrity_warnings   = fraud_result.get("warnings", [])
         authenticity_penalty = fraud_result.get("authenticity_penalty", 0.0)
+        is_high_risk         = fraud_result.get("is_high_risk", False)
+
+        # ── High Risk Hard Clamping ──────────────────────────────────────────────
+        if is_high_risk:
+            log.warning(f"[FRAUD] HIGH RISK FLAG! Hard clamping multipliers. "
+                        f"Effort: {evidence.effort_hours}->min(1.0), "
+                        f"People: {evidence.people_helped}->min(2), Urgency: LOW")
+            evidence.effort_hours  = min(evidence.effort_hours, 1.0)
+            evidence.people_helped = min(evidence.people_helped, 2)
+            evidence.urgency_level = "LOW"
+            integrity_warnings.append("high_risk_multipliers_clamped")
 
         # ── Capture timestamp freshness check (live_capture only) ──────────────
         if body.source == "live_capture" and body.capture_timestamp:
@@ -413,7 +431,7 @@ async def verify_impact(
         # ── Evaluate (may raise for low score OR low confidence) ──────────────
         try:
             payload: OraclePayload = evaluator.evaluate(evidence, image_bytes=image_bytes)
-        except RuntimeError as eval_err:
+        except EvaluationFailedError as eval_err:
             err_msg = str(eval_err)
             if "Insufficient impact" in err_msg:
                 # Score too low for contract — route to community review
@@ -429,13 +447,14 @@ async def verify_impact(
                     "longitude":              body.gps.longitude,
                     "effort_hours":           body.effort_hours,
                     "people_helped":          body.people_helped,
-                    "impact_score":           0.0,
-                    "ai_confidence":          0.0,
+                    "impact_score":           round(eval_err.impact_score, 2),
+                    "ai_confidence":          round(eval_err.ai_confidence, 4),
                     "token_reward":           0.0,
                     "source":                 body.source,
                     "image_base64":           body.image_base64,
                     "integrity_warnings":     integrity_warnings + ["impact_below_threshold"],
                     "needs_community_review": True,
+                    "needs_champion_audit":   is_high_risk or body.urgency_level == "CRITICAL",
                     "submitted_at":           int(time.time()),
                 }
                 redis_client.lpush("satin:stream_store", json.dumps(low_score_entry))
@@ -444,13 +463,14 @@ async def verify_impact(
                     "votes":     {},
                     "opened_at": int(time.time()),
                     "outcome":   None,
+                    "needs_champion_audit": is_high_risk or body.urgency_level == "CRITICAL",
                 }
                 redis_client.set(f"satin:vote_store:{event_id}", json.dumps(vote_data))
                 # Return a minimal response so frontend shows community review state
                 return {
                     "event_id":               event_id,
-                    "impact_score":           0.0,
-                    "ai_confidence":          0.0,
+                    "impact_score":           round(eval_err.impact_score, 2),
+                    "ai_confidence":          round(eval_err.ai_confidence, 4),
                     "token_reward":           0.0,
                     "integrity_warnings":     low_score_entry["integrity_warnings"],
                     "authenticity_penalty":   authenticity_penalty,
@@ -465,7 +485,9 @@ async def verify_impact(
 
 
         # ── Append to Community Stream ──────────────────────────────────────────
-        needs_review = payload.ai_confidence < COMMUNITY_REVIEW_CONFIDENCE
+        needs_champion_audit = is_high_risk or (body.urgency_level == "CRITICAL" and payload.ai_confidence < 0.60)
+        needs_review = payload.ai_confidence < COMMUNITY_REVIEW_CONFIDENCE or needs_champion_audit
+        
         stream_entry = {
             "event_id":           payload.event_id,
             "volunteer_address":  body.volunteer_address,
@@ -483,6 +505,7 @@ async def verify_impact(
             "image_base64":       body.image_base64 if body.image_base64 else None,
             "integrity_warnings": integrity_warnings,
             "needs_community_review": needs_review,
+            "needs_champion_audit": needs_champion_audit,
             "submitted_at":       int(time.time()),
         }
         redis_client.lpush("satin:stream_store", json.dumps(stream_entry))
@@ -493,6 +516,7 @@ async def verify_impact(
                 "votes":      {},
                 "opened_at": int(time.time()),
                 "outcome":   None,
+                "needs_champion_audit": needs_champion_audit,
             }
             redis_client.set(f"satin:vote_store:{payload.event_id}", json.dumps(vote_data))
             log.info(f"[STREAM] Submission flagged for community review: {payload.event_id} (confidence={payload.ai_confidence:.2f})")
@@ -637,14 +661,24 @@ async def cast_vote(
         )
 
     # Phase eligibility (against verified reputation)
+    needs_champion_audit = vd.get("needs_champion_audit", False)
     age_sec = int(time.time()) - vd["opened_at"]
-    if age_sec < VOTE_PHASE2_DELAY_SEC and reputation_score < CHAMPION_REPUTATION_THRESHOLD:
-        phase2_in = VOTE_PHASE2_DELAY_SEC - age_sec
-        raise HTTPException(
-            status_code=403,
-            detail=f"Phase 1: only CHAMPION+ (reputation ≥ {CHAMPION_REPUTATION_THRESHOLD}) may vote. "
-                   f"Open voting in {phase2_in // 60}m {phase2_in % 60}s."
-        )
+
+    if needs_champion_audit:
+        if reputation_score < CHAMPION_REPUTATION_THRESHOLD:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Exclusive Audit: Only CHAMPION+ (reputation ≥ {CHAMPION_REPUTATION_THRESHOLD}) "
+                       f"can vote on this high-risk submission. Standard timer does not apply."
+            )
+    else:
+        if age_sec < VOTE_PHASE2_DELAY_SEC and reputation_score < CHAMPION_REPUTATION_THRESHOLD:
+            phase2_in = VOTE_PHASE2_DELAY_SEC - age_sec
+            raise HTTPException(
+                status_code=403,
+                detail=f"Phase 1: only CHAMPION+ (reputation ≥ {CHAMPION_REPUTATION_THRESHOLD}) may vote. "
+                       f"Open voting in {phase2_in // 60}m {phase2_in % 60}s."
+            )
 
     # Prevent self-voting
     voter = body.voter_address.lower()
@@ -685,6 +719,26 @@ async def cast_vote(
                     vd["claim_contract_args"] = contract_args
                 except Exception as ce:
                     log.error(f"[VOTE] Failed to generate claim payload for {eid}: {ce}")
+                    
+            # If approved, reset the reject streak for this volunteer
+            if stream_entry:
+                vol_addr = stream_entry["volunteer_address"].lower()
+                redis_client.delete(f"satin:reject_streak:{vol_addr}")
+
+        elif outcome == "rejected":
+            # ── Record consecutive rejects for Auto-Ban ──────────────────────
+            if stream_entry:
+                vol_addr = stream_entry["volunteer_address"].lower()
+                streak_key = f"satin:reject_streak:{vol_addr}"
+                streak = redis_client.incr(streak_key)
+                redis_client.expire(streak_key, 7 * 24 * 3600)  # Reset streak if clean for 7 days
+                log.info(f"[BAN] {vol_addr} reject streak is now {streak}")
+                
+                if streak >= 3:
+                    log.warning(f"[BAN] {vol_addr} rejected 3 times consecutively! Triggering AUTO-BAN.")
+                    redis_client.set(f"satin:banned:{vol_addr}", "true")
+                    # TODO: Dispatch Web3 transaction to ReputationLedger.banAddress(vol_addr) 
+                    # from the ORACLE wallet if required for strict on-chain synchronization.
 
     # Save updated vote state to Redis
     redis_client.set(f"satin:vote_store:{eid}", json.dumps(vd))

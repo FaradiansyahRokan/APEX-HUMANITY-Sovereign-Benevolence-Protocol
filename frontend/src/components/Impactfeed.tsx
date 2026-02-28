@@ -5,6 +5,7 @@ import { usePublicClient } from "wagmi";
 import { formatUnits } from "viem";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { CONTRACTS } from "../utils/constants";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface FeedEv {
   eventId: string; volunteer: string;
@@ -14,18 +15,18 @@ interface FeedEv {
 
 function ago(ts: number): string {
   const d = Math.floor(Date.now() / 1000) - ts;
-  if (d < 60)    return `${d}s ago`;
-  if (d < 3600)  return `${Math.floor(d / 60)}m ago`;
+  if (d < 60) return `${d}s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
   if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
   return `${Math.floor(d / 86400)}d ago`;
 }
 
 function ScoreBadge({ score }: { score: number }) {
   const high = score >= 80;
-  const mid  = score >= 60 && score < 80;
-  const gradient = high  ? "linear-gradient(135deg,#00dfb2,#7c6aff)"
-                  : mid  ? "linear-gradient(135deg,#7c6aff,#ff6eb4)"
-                         : "linear-gradient(135deg,#667788,#889aaa)";
+  const mid = score >= 60 && score < 80;
+  const gradient = high ? "linear-gradient(135deg,#00dfb2,#7c6aff)"
+    : mid ? "linear-gradient(135deg,#7c6aff,#ff6eb4)"
+      : "linear-gradient(135deg,#667788,#889aaa)";
   const glow = high ? "rgba(0,223,178,0.25)" : mid ? "rgba(124,106,255,0.25)" : "transparent";
 
   return (
@@ -55,7 +56,7 @@ export default function ImpactFeed() {
   const client = usePublicClient();
   const [events, setEvents] = useState<FeedEv[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newCnt, setNewCnt]   = useState(0);
+  const [newCnt, setNewCnt] = useState(0);
 
   useEffect(() => {
     if (!client) return;
@@ -66,26 +67,26 @@ export default function ImpactFeed() {
           event: {
             type: "event", name: "RewardReleased",
             inputs: [
-              { type: "bytes32", name: "eventId",      indexed: true },
-              { type: "address", name: "volunteer",    indexed: true },
-              { type: "address", name: "beneficiary",  indexed: true },
-              { type: "uint256", name: "impactScore",  indexed: false },
-              { type: "uint256", name: "tokenReward",  indexed: false },
-              { type: "bytes32", name: "zkProofHash",  indexed: false },
-              { type: "bytes32", name: "eventHash",    indexed: false },
-              { type: "uint256", name: "timestamp",    indexed: false },
+              { type: "bytes32", name: "eventId", indexed: true },
+              { type: "address", name: "volunteer", indexed: true },
+              { type: "address", name: "beneficiary", indexed: true },
+              { type: "uint256", name: "impactScore", indexed: false },
+              { type: "uint256", name: "tokenReward", indexed: false },
+              { type: "bytes32", name: "zkProofHash", indexed: false },
+              { type: "bytes32", name: "eventHash", indexed: false },
+              { type: "uint256", name: "timestamp", indexed: false },
             ],
           },
           fromBlock: "earliest", toBlock: "latest",
         });
         setEvents(logs.map((l: any) => ({
-          eventId:     l.args.eventId,
-          volunteer:   l.args.volunteer,
+          eventId: l.args.eventId,
+          volunteer: l.args.volunteer,
           impactScore: Number(l.args.impactScore) / 100,
           tokenReward: Number(formatUnits(l.args.tokenReward, 18)),
-          txHash:      l.transactionHash,
+          txHash: l.transactionHash,
           blockNumber: l.blockNumber,
-          timestamp:   Number(l.args.timestamp),
+          timestamp: Number(l.args.timestamp),
         })).reverse());
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
@@ -99,13 +100,13 @@ export default function ImpactFeed() {
       abi: BENEVOLENCE_VAULT_ABI, eventName: "RewardReleased",
       onLogs: (logs: any[]) => {
         const ne = logs.map(l => ({
-          eventId:     l.args.eventId,
-          volunteer:   l.args.volunteer,
+          eventId: l.args.eventId,
+          volunteer: l.args.volunteer,
           impactScore: Number(l.args.impactScore) / 100,
           tokenReward: Number(formatUnits(l.args.tokenReward, 18)),
-          txHash:      l.transactionHash,
+          txHash: l.transactionHash,
           blockNumber: l.blockNumber,
-          timestamp:   Number(l.args.timestamp),
+          timestamp: Number(l.args.timestamp),
         }));
         setEvents(p => [...ne, ...p]);
         setNewCnt(c => c + ne.length);
@@ -199,92 +200,116 @@ export default function ImpactFeed() {
         )}
 
         {!loading && events.length === 0 && (
-          <div style={{ padding: "80px 24px", textAlign: "center" }}>
-            <p style={{ fontSize: "36px", opacity: 0.06, marginBottom: "14px" }}>⛓️</p>
-            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.35)", marginBottom: "5px" }}>No events yet</p>
-            <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.2)" }}>Submit your first impact proof to start the feed</p>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            style={{
+              padding: "80px 40px", textAlign: "center",
+              background: "linear-gradient(135deg, rgba(255,255,255,0.01), transparent)",
+              position: "relative", overflow: "hidden"
+            }}
+          >
+            <div style={{ position: "absolute", inset: "-50%", background: "radial-gradient(circle, rgba(0,223,178,0.03) 0%, transparent 60%)", pointerEvents: "none" }} />
+            <div style={{
+              width: "80px", height: "80px", margin: "0 auto 20px", borderRadius: "50%",
+              background: "rgba(0,223,178,0.05)", display: "flex", alignItems: "center", justifyContent: "center",
+              border: "1px solid rgba(0,223,178,0.15)", boxShadow: "0 0 40px rgba(0,223,178,0.1) inset"
+            }}>
+              <span style={{ fontSize: "32px", filter: "drop-shadow(0 0 10px rgba(0,223,178,0.5))" }}>⛓️</span>
+            </div>
+            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: "18px", color: "rgba(255,255,255,0.8)", marginBottom: "8px", position: "relative" }}>
+              The Ledger is Waiting
+            </p>
+            <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", lineHeight: 1.6, maxWidth: "300px", margin: "0 auto", position: "relative" }}>
+              Submit your first verified impact proof to kickstart the on-chain feed.
+            </p>
+          </motion.div>
         )}
 
-        {!loading && events.map((ev, i) => (
-          <div key={ev.txHash + i}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "46px 1fr auto",
-              alignItems: "center",
-              gap: "14px",
-              padding: "14px 18px",
-              borderTop: i > 0 ? "1px solid rgba(255,255,255,0.04)" : undefined,
-              transition: "background 0.15s",
-              position: "relative",
-            }}
-            onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.025)"}
-            onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = "transparent"}
-          >
-            {/* Latest indicator */}
-            {i === 0 && (
-              <div style={{
-                position: "absolute", left: 0, top: 0, bottom: 0, width: "2px",
-                background: "linear-gradient(180deg,#00dfb2,transparent)",
-              }} />
-            )}
+        <AnimatePresence mode="popLayout">
+          {!loading && events.map((ev, i) => (
+            <motion.div key={ev.txHash + i}
+              layout
+              initial={{ opacity: 0, scale: 0.95, y: -20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: i * 0.05 }}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "46px 1fr auto",
+                alignItems: "center",
+                gap: "14px",
+                padding: "14px 18px",
+                borderTop: i > 0 ? "1px solid rgba(255,255,255,0.04)" : undefined,
+                transition: "background 0.15s",
+                position: "relative",
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.025)"}
+              onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = "transparent"}
+            >
+              {/* Latest indicator */}
+              {i === 0 && (
+                <div style={{
+                  position: "absolute", left: 0, top: 0, bottom: 0, width: "2px",
+                  background: "linear-gradient(180deg,#00dfb2,transparent)",
+                }} />
+              )}
 
-            <ScoreBadge score={ev.impactScore} />
+              <ScoreBadge score={ev.impactScore} />
 
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px" }}>
-                <span style={{
-                  fontFamily: "'JetBrains Mono',monospace",
-                  fontSize: "12px", color: "rgba(255,255,255,0.65)",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {ev.volunteer.slice(0, 8)}…{ev.volunteer.slice(-6)}
-                </span>
-                {i === 0 && (
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px", flexWrap: "wrap" }}>
                   <span style={{
-                    fontSize: "8px", padding: "2px 7px", borderRadius: "4px",
-                    background: "rgba(0,223,178,0.1)", border: "1px solid rgba(0,223,178,0.2)",
-                    color: "#00dfb2", fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
-                    letterSpacing: "0.08em",
-                  }}>LATEST</span>
-                )}
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: "12px", color: "rgba(255,255,255,0.65)",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {ev.volunteer.slice(0, 8)}…{ev.volunteer.slice(-6)}
+                  </span>
+                  {i === 0 && (
+                    <span style={{
+                      fontSize: "8px", padding: "2px 7px", borderRadius: "4px",
+                      background: "rgba(0,223,178,0.1)", border: "1px solid rgba(0,223,178,0.2)",
+                      color: "#00dfb2", fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
+                      letterSpacing: "0.08em",
+                    }}>LATEST</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                  <span style={{
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: "12px", fontWeight: 700,
+                    background: "linear-gradient(90deg,#ffbd59,#ff6eb4)",
+                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                  }}>+{ev.tokenReward.toFixed(2)} APEX</span>
+                  <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>
+                    #{ev.blockNumber.toString()}
+                  </span>
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span style={{
-                  fontFamily: "'JetBrains Mono',monospace",
-                  fontSize: "12px", fontWeight: 700,
-                  background: "linear-gradient(90deg,#ffbd59,#ff6eb4)",
-                  WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                }}>+{ev.tokenReward.toFixed(2)} APEX</span>
-                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>
-                  #{ev.blockNumber.toString()}
-                </span>
-              </div>
-            </div>
 
-            <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <p style={{
-                fontFamily: "'JetBrains Mono',monospace",
-                fontSize: "10px", color: "rgba(255,255,255,0.25)", marginBottom: "5px",
-              }}>{ago(ev.timestamp)}</p>
-              <a
-                href="#"
-                onClick={e => { e.preventDefault(); navigator.clipboard.writeText(ev.txHash); }}
-                title="Copy TX hash"
-                style={{
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <p style={{
                   fontFamily: "'JetBrains Mono',monospace",
-                  fontSize: "10px", color: "#7c6aff",
-                  opacity: 0.5, textDecoration: "none",
-                  transition: "opacity 0.15s",
-                }}
-                onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.opacity = "1"}
-                onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.opacity = "0.5"}
-              >
-                {ev.txHash.slice(0, 10)}…
-              </a>
-            </div>
-          </div>
-        ))}
+                  fontSize: "10px", color: "rgba(255,255,255,0.25)", marginBottom: "5px",
+                }}>{ago(ev.timestamp)}</p>
+                <a
+                  href="#"
+                  onClick={e => { e.preventDefault(); navigator.clipboard.writeText(ev.txHash); }}
+                  title="Copy TX hash"
+                  style={{
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: "10px", color: "#7c6aff",
+                    opacity: 0.5, textDecoration: "none",
+                    transition: "opacity 0.15s",
+                  }}
+                  onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.opacity = "1"}
+                  onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.opacity = "0.5"}
+                >
+                  {ev.txHash.slice(0, 10)}…
+                </a>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
       <style>{`

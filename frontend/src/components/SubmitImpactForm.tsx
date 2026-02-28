@@ -74,6 +74,7 @@ export default function SubmitImpactForm() {
   const [cameraActive, setCameraActive] = useState(false);
   const [captureTimestamp, setCaptureTimestamp] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [form, setForm] = useState<Form>({
     actionType: "FOOD_DISTRIBUTION", urgencyLevel: "HIGH",
     description: "", effortHours: 4, peopleHelped: 10,
@@ -568,142 +569,144 @@ export default function SubmitImpactForm() {
 
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
 
-        {/* Action Type */}
-        <div style={{ ...glassCard, padding: "20px 22px" }}>
-          <label style={labelStyle}>Action Type</label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "7px" }}>
-            {ACTION_TYPES.map((a: { value: string; label: string }) => {
-              const active = form.actionType === a.value;
-              return (
-                <button key={a.value} type="button"
-                  onClick={() => setForm(f => ({ ...f, actionType: a.value }))}
-                  style={{
-                    padding: "9px 10px", borderRadius: "9px",
-                    background: active ? "rgba(0,223,178,0.07)" : "rgba(255,255,255,0.02)",
-                    border: `1px solid ${active ? "rgba(0,223,178,0.2)" : "rgba(255,255,255,0.06)"}`,
-                    fontFamily: "'Plus Jakarta Sans',sans-serif",
-                    fontSize: "11px", fontWeight: active ? 700 : 400,
-                    color: active ? "#00dfb2" : "rgba(255,255,255,0.35)",
-                    cursor: "pointer", transition: "all 0.15s", textAlign: "left" as const,
-                  }}>
-                  {a.label}
-                </button>
-              );
-            })}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Action Type */}
+          <div style={{ ...glassCard, padding: "20px 22px" }}>
+            <label style={labelStyle}>Action Type</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "7px" }}>
+              {ACTION_TYPES.map((a: { value: string; label: string }) => {
+                const active = form.actionType === a.value;
+                return (
+                  <button key={a.value} type="button"
+                    onClick={() => setForm(f => ({ ...f, actionType: a.value }))}
+                    style={{
+                      padding: "9px 10px", borderRadius: "9px",
+                      background: active ? "rgba(0,223,178,0.07)" : "rgba(255,255,255,0.02)",
+                      border: `1px solid ${active ? "rgba(0,223,178,0.2)" : "rgba(255,255,255,0.06)"}`,
+                      fontFamily: "'Plus Jakarta Sans',sans-serif",
+                      fontSize: "11px", fontWeight: active ? 700 : 400,
+                      color: active ? "#00dfb2" : "rgba(255,255,255,0.35)",
+                      cursor: "pointer", transition: "all 0.15s", textAlign: "left" as const,
+                    }}>
+                    {a.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        {/* Urgency Level */}
-        <div style={{ ...glassCard, padding: "20px 22px" }}>
-          <label style={labelStyle}>Urgency Level</label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
-            {URGENCY_LEVELS.map((u: { value: string; label: string }) => {
-              const active = form.urgencyLevel === u.value;
-              const m = URGENCY_META[u.value] || URGENCY_META.MEDIUM;
-              return (
-                <button key={u.value} type="button"
-                  onClick={() => setForm(f => ({ ...f, urgencyLevel: u.value }))}
-                  style={{
-                    padding: "10px 6px", borderRadius: "10px",
-                    background: active ? m.bg : "rgba(255,255,255,0.02)",
-                    border: `1px solid ${active ? m.border : "rgba(255,255,255,0.06)"}`,
-                    fontFamily: "'Plus Jakarta Sans',sans-serif",
-                    fontSize: "12px", fontWeight: active ? 800 : 400,
-                    color: active ? "transparent" : "rgba(255,255,255,0.3)",
-                    background2: active ? m.gradient : "none",
-                    ...(active ? {
-                      backgroundImage: m.gradient,
-                      WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                    } : {}),
-                    cursor: "pointer", transition: "all 0.15s",
-                    boxShadow: active ? `0 2px 12px ${m.glow}` : "none",
-                  } as any}>
-                  {u.label}
-                </button>
-              );
-            })}
+          {/* Urgency Level */}
+          <div style={{ ...glassCard, padding: "20px 22px" }}>
+            <label style={labelStyle}>Urgency Level</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
+              {URGENCY_LEVELS.map((u: { value: string; label: string }) => {
+                const active = form.urgencyLevel === u.value;
+                const m = URGENCY_META[u.value] || URGENCY_META.MEDIUM;
+                return (
+                  <button key={u.value} type="button"
+                    onClick={() => setForm(f => ({ ...f, urgencyLevel: u.value }))}
+                    style={{
+                      padding: "10px 6px", borderRadius: "10px",
+                      background: active ? m.bg : "rgba(255,255,255,0.02)",
+                      border: `1px solid ${active ? m.border : "rgba(255,255,255,0.06)"}`,
+                      fontFamily: "'Plus Jakarta Sans',sans-serif",
+                      fontSize: "12px", fontWeight: active ? 800 : 400,
+                      color: active ? "transparent" : "rgba(255,255,255,0.3)",
+                      background2: active ? m.gradient : "none",
+                      ...(active ? {
+                        backgroundImage: m.gradient,
+                        WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                      } : {}),
+                      cursor: "pointer", transition: "all 0.15s",
+                      boxShadow: active ? `0 2px 12px ${m.glow}` : "none",
+                    } as any}>
+                    {u.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        {/* Description */}
-        <div style={{ ...glassCard, padding: "20px 22px" }}>
-          <label style={labelStyle}>Impact Description</label>
-          <textarea value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            rows={4} required
-            placeholder="Describe the beneficial action. The AI analyzes this for impact scoring…"
-            style={{
-              ...inputStyle,
-              resize: "none", lineHeight: 1.65,
-              fontFamily: "'Plus Jakarta Sans',sans-serif",
-            }}
-            onFocus={e => (e.target as HTMLTextAreaElement).style.borderColor = "rgba(255,255,255,0.2)"}
-            onBlur={e => (e.target as HTMLTextAreaElement).style.borderColor = "rgba(255,255,255,0.08)"}
-          />
-        </div>
-
-        {/* Sliders */}
-        <div style={{ ...glassCard, padding: "20px 22px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-            {[
-              { key: "effortHours", label: "Effort Hours", min: 0.5, max: 72, step: 0.5, unit: "h", val: form.effortHours, gradient: "linear-gradient(90deg,#7c6aff,#ff6eb4)" },
-              { key: "peopleHelped", label: "People Helped", min: 1, max: 500, step: 1, unit: "", val: form.peopleHelped, gradient: "linear-gradient(90deg,#00dfb2,#7c6aff)" },
-            ].map(sl => (
-              <div key={sl.key}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                  <label style={{ ...labelStyle, marginBottom: 0 }}>{sl.label}</label>
-                  <span style={{
-                    fontFamily: "'JetBrains Mono',monospace", fontSize: "13px", fontWeight: 700,
-                    background: sl.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                  }}>{sl.val}{sl.unit}</span>
-                </div>
-                <input type="range" min={sl.min} max={sl.max} step={sl.step}
-                  value={sl.val}
-                  onChange={e => setForm(f => ({ ...f, [sl.key]: Number(e.target.value) }))}
-                  style={{ width: "100%", accentColor: "#00dfb2", cursor: "pointer" }} />
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
-                  <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{sl.min}{sl.unit}</span>
-                  <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{sl.max}{sl.unit}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* GPS */}
-        <div style={{ ...glassCard, padding: "20px 22px" }}>
-          <label style={labelStyle}>GPS Coordinates</label>
-          <div style={{ display: "flex", gap: "8px" }}>
-            {[
-              { ph: "Latitude", key: "latitude", val: form.latitude },
-              { ph: "Longitude", key: "longitude", val: form.longitude },
-            ].map(inp => (
-              <input key={inp.key} type="number" placeholder={inp.ph} step="any"
-                value={inp.val || ""}
-                onChange={e => setForm(f => ({ ...f, [inp.key]: Number(e.target.value) }))}
-                style={{ ...inputStyle, fontFamily: "'JetBrains Mono',monospace", fontSize: "12px" }}
-                onFocus={e => (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"}
-                onBlur={e => (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"}
-              />
-            ))}
-            <button type="button"
-              onClick={() => navigator.geolocation.getCurrentPosition(
-                p => setForm(f => ({ ...f, latitude: p.coords.latitude, longitude: p.coords.longitude })),
-                () => setError("Could not get location.")
-              )}
+          {/* Description */}
+          <div style={{ ...glassCard, padding: "20px 22px" }}>
+            <label style={labelStyle}>Impact Description</label>
+            <textarea value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              rows={4} required
+              placeholder="Describe the beneficial action. The AI analyzes this for impact scoring…"
               style={{
-                padding: "11px 14px", borderRadius: "10px", flexShrink: 0,
-                background: "rgba(0,223,178,0.06)", border: "1px solid rgba(0,223,178,0.15)",
+                ...inputStyle,
+                resize: "none", lineHeight: 1.65,
                 fontFamily: "'Plus Jakarta Sans',sans-serif",
-                fontSize: "12px", color: "#00dfb2",
-                cursor: "pointer", whiteSpace: "nowrap" as const, fontWeight: 600,
-                transition: "all 0.15s",
               }}
-              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.1)"}
-              onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.06)"}
-            >
-              📍 Auto
-            </button>
+              onFocus={e => (e.target as HTMLTextAreaElement).style.borderColor = "rgba(255,255,255,0.2)"}
+              onBlur={e => (e.target as HTMLTextAreaElement).style.borderColor = "rgba(255,255,255,0.08)"}
+            />
+          </div>
+
+          {/* Sliders */}
+          <div style={{ ...glassCard, padding: "20px 22px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+              {[
+                { key: "effortHours", label: "Effort Hours", min: 0.5, max: 72, step: 0.5, unit: "h", val: form.effortHours, gradient: "linear-gradient(90deg,#7c6aff,#ff6eb4)" },
+                { key: "peopleHelped", label: "People Helped", min: 1, max: 500, step: 1, unit: "", val: form.peopleHelped, gradient: "linear-gradient(90deg,#00dfb2,#7c6aff)" },
+              ].map(sl => (
+                <div key={sl.key}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                    <label style={{ ...labelStyle, marginBottom: 0 }}>{sl.label}</label>
+                    <span style={{
+                      fontFamily: "'JetBrains Mono',monospace", fontSize: "13px", fontWeight: 700,
+                      background: sl.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                    }}>{sl.val}{sl.unit}</span>
+                  </div>
+                  <input type="range" min={sl.min} max={sl.max} step={sl.step}
+                    value={sl.val}
+                    onChange={e => setForm(f => ({ ...f, [sl.key]: Number(e.target.value) }))}
+                    style={{ width: "100%", accentColor: "#00dfb2", cursor: "pointer" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
+                    <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{sl.min}{sl.unit}</span>
+                    <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{sl.max}{sl.unit}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* GPS */}
+          <div style={{ ...glassCard, padding: "20px 22px" }}>
+            <label style={labelStyle}>GPS Coordinates</label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {[
+                { ph: "Latitude", key: "latitude", val: form.latitude },
+                { ph: "Longitude", key: "longitude", val: form.longitude },
+              ].map(inp => (
+                <input key={inp.key} type="number" placeholder={inp.ph} step="any"
+                  value={inp.val || ""}
+                  onChange={e => setForm(f => ({ ...f, [inp.key]: Number(e.target.value) }))}
+                  style={{ ...inputStyle, fontFamily: "'JetBrains Mono',monospace", fontSize: "12px" }}
+                  onFocus={e => (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"}
+                  onBlur={e => (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"}
+                />
+              ))}
+              <button type="button"
+                onClick={() => navigator.geolocation.getCurrentPosition(
+                  p => setForm(f => ({ ...f, latitude: p.coords.latitude, longitude: p.coords.longitude })),
+                  () => setError("Could not get location.")
+                )}
+                style={{
+                  padding: "11px 14px", borderRadius: "10px", flexShrink: 0,
+                  background: "rgba(0,223,178,0.06)", border: "1px solid rgba(0,223,178,0.15)",
+                  fontFamily: "'Plus Jakarta Sans',sans-serif",
+                  fontSize: "12px", color: "#00dfb2",
+                  cursor: "pointer", whiteSpace: "nowrap" as const, fontWeight: 600,
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.1)"}
+                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.06)"}
+              >
+                📍 Auto
+              </button>
+            </div>
           </div>
         </div>
 
@@ -748,7 +751,11 @@ export default function SubmitImpactForm() {
           {/* Live Camera Stream */}
           {cameraActive && (
             <div style={{ padding: "0 16px 16px" }}>
-              <div style={{ position: "relative" as const, borderRadius: "12px", overflow: "hidden", background: "#000" }}>
+              <div style={{
+                position: "relative" as const, borderRadius: "12px", overflow: "hidden", background: "#000",
+                boxShadow: "0 0 0 3px rgba(124,106,255,0.2), 0 0 24px rgba(124,106,255,0.15)",
+                animation: "pulse 2.5s infinite"
+              }}>
                 <video ref={videoRef} autoPlay playsInline muted
                   style={{ width: "100%", display: "block", maxHeight: "260px", objectFit: "cover" }} />
                 <div style={{
@@ -869,21 +876,39 @@ export default function SubmitImpactForm() {
           </div>
         )}
 
+        {/* T&C Warning */}
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: "10px", padding: "12px",
+          background: "rgba(255,255,255,0.02)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <input
+            type="checkbox"
+            id="tnc"
+            checked={termsAccepted}
+            onChange={(e) => setTermsAccepted(e.target.checked)}
+            style={{ marginTop: "4px", accentColor: "#7c6aff", width: "16px", height: "16px", cursor: "pointer" }}
+          />
+          <label htmlFor="tnc" style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.5, cursor: "pointer", userSelect: "none" }}>
+            Saya bersumpah data ini <strong>asli dan jujur</strong>. Saya mengerti bahwa memanipulasi bukti (Photoshop, hapus EXIF, lokasi palsu) akan melukai komunitas dan
+            <span style={{ color: "rgba(255,80,80,0.8)" }}> dapat mengakibatkan PEMBLOKIRAN PERMANEN (Auto-Ban)</span> pada akun saya dari seluruh platform APEX.
+          </label>
+        </div>
+
         {/* Submit */}
-        <button type="submit" disabled={busy || !form.description}
+        <button type="submit" disabled={busy || !form.description || !termsAccepted}
           style={{
             width: "100%", padding: "15px", borderRadius: "12px", border: "none",
-            background: busy || !form.description
+            background: busy || !form.description || !termsAccepted
               ? "rgba(255,255,255,0.04)"
               : "linear-gradient(135deg,#00dfb2,#7c6aff)",
             fontFamily: "'Plus Jakarta Sans',sans-serif",
             fontSize: "14px", fontWeight: 800,
-            color: busy || !form.description ? "rgba(255,255,255,0.2)" : "#0a0510",
-            cursor: busy || !form.description ? "not-allowed" : "pointer",
+            color: busy || !form.description || !termsAccepted ? "rgba(255,255,255,0.2)" : "#0a0510",
+            cursor: busy || !form.description || !termsAccepted ? "not-allowed" : "pointer",
             transition: "all 0.2s", letterSpacing: "0.02em",
-            boxShadow: busy || !form.description ? "none" : "0 4px 24px rgba(0,223,178,0.3)",
+            boxShadow: busy || !form.description || !termsAccepted ? "none" : "0 4px 24px rgba(0,223,178,0.3)",
           }}
-          onMouseEnter={e => { if (!busy && form.description) (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
+          onMouseEnter={e => { if (!busy && form.description && termsAccepted) (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0)"; }}
         >
           ✦ Submit Impact Proof
@@ -893,6 +918,7 @@ export default function SubmitImpactForm() {
       <style>{`
         @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes shimmer { 0%{background-position:0% 0%} 100%{background-position:200% 0%} }
+        @keyframes pulse { 0%{box-shadow:0 0 0 2px rgba(124,106,255,0.1),0 0 10px rgba(124,106,255,0.05)} 50%{box-shadow:0 0 0 4px rgba(124,106,255,0.3),0 0 28px rgba(124,106,255,0.3)} 100%{box-shadow:0 0 0 2px rgba(124,106,255,0.1),0 0 10px rgba(124,106,255,0.05)} }
       `}</style>
     </div>
   );

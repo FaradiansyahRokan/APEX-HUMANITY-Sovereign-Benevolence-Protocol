@@ -313,21 +313,23 @@ class FraudDetector:
         penalty   = 0.0
 
         if not image_bytes:
-            return {"ok": True, "warnings": [], "authenticity_penalty": 0.0}
+            return {"ok": True, "warnings": [], "authenticity_penalty": 0.0, "is_high_risk": False}
 
         # Live capture from in-app camera produces a canvas JPEG with no EXIF —
         # this is expected and should NOT be penalized.
         if source == "live_capture":
             logger.info("[EXIF] Skipping EXIF check for live_capture (canvas JPEG has no EXIF by design)")
-            return {"ok": True, "warnings": [], "authenticity_penalty": 0.0}
+            return {"ok": True, "warnings": [], "authenticity_penalty": 0.0, "is_high_risk": False}
 
         exif = _extract_exif(image_bytes)
+        is_high_risk = False
 
         # No EXIF at all — likely screenshot, AI-gen, or WhatsApp-recompressed
         if not exif["has_exif"]:
             warnings.append("no_exif_metadata")
             penalty += 0.15  # 15% authenticity penalty
-            logger.info("[EXIF] No EXIF found — possible AI/screenshot image")
+            is_high_risk = True
+            logger.info("[EXIF] No EXIF found — possible AI/screenshot image -> HIGH RISK")
         else:
             # Timestamp check
             dt_str = exif.get("datetime_original")
@@ -340,6 +342,8 @@ class FraudDetector:
                         warnings.append(f"photo_too_old_{int(age_hours)}h")
                         # Graduated penalty: 48h-168h = 15%, >168h (1 week) = 30%
                         penalty += 0.30 if age_hours > 168 else 0.15
+                        if age_hours > 168:
+                            is_high_risk = True
                         logger.warning(f"[EXIF] Photo age: {age_hours:.1f}h (limit: {EXIF_MAX_AGE_HOURS}h)")
                 except Exception:
                     pass
@@ -366,6 +370,7 @@ class FraudDetector:
             "ok":                   True,   # EXIF issues → penalty only, not hard reject
             "warnings":             warnings,
             "authenticity_penalty": round(min(penalty, 0.50), 2),  # cap at 50%
+            "is_high_risk":         is_high_risk,
         }
 
     # ── Layer 4: ELA Analysis ──────────────────────────────────────────────────
@@ -374,7 +379,7 @@ class FraudDetector:
         Returns {"ok": True, "ela_score": float, "verdict": str, "penalty": float}
         """
         if not image_bytes:
-            return {"ok": True, "ela_score": 0.0, "verdict": "no_image", "penalty": 0.0}
+            return {"ok": True, "ela_score": 0.0, "verdict": "no_image", "penalty": 0.0, "is_high_risk": False}
 
         result = _run_ela(image_bytes)
         ela    = result["ela_score"]
@@ -391,6 +396,7 @@ class FraudDetector:
             "ela_score": ela,
             "verdict":   result["verdict"],
             "penalty":   penalty,
+            "is_high_risk": result["verdict"] == "suspicious",
         }
 
     # ── Combined check ─────────────────────────────────────────────────────────
@@ -414,28 +420,31 @@ class FraudDetector:
         """
         all_warnings: list[str] = []
         total_penalty: float    = 0.0
+        global_is_high_risk: bool = False
 
         # 1. Rate limit (hard block)
         r = self.check_rate_limit(volunteer_address)
         if not r["ok"]:
-            return {**r, "warnings": [], "authenticity_penalty": 0.0}
+            return {**r, "warnings": [], "authenticity_penalty": 0.0, "is_high_risk": False}
 
         # 2. SHA-256 exact dedup (hard block)
         if hash_sha256 and hash_sha256 not in ("0" * 64,):
             r = self.check_sha256(hash_sha256, volunteer_address)
             if not r["ok"]:
-                return {**r, "warnings": [], "authenticity_penalty": 0.0}
+                return {**r, "warnings": [], "authenticity_penalty": 0.0, "is_high_risk": False}
 
         if image_bytes:
             # 3. Perceptual hash (hard block — Sybil)
             r = self.check_image_phash(image_bytes, volunteer_address)
             if not r["ok"]:
-                return {**r, "warnings": [], "authenticity_penalty": 0.0}
+                return {**r, "warnings": [], "authenticity_penalty": 0.0, "is_high_risk": False}
 
             # 4. EXIF metadata (soft — penalty only)
             exif_r = self.check_exif(image_bytes, submit_lat, submit_lon, source)
             all_warnings.extend(exif_r["warnings"])
             total_penalty += exif_r["authenticity_penalty"]
+            if exif_r.get("is_high_risk"):
+                global_is_high_risk = True
 
             # 5. ELA analysis (soft — penalty only)
             ela_r = self.check_ela(image_bytes)
@@ -443,10 +452,13 @@ class FraudDetector:
                 # Only flag when suspicious/possibly_edited — authentic is a pass, not a warning
                 all_warnings.append(f"ela_{ela_r['verdict']}")
                 total_penalty += ela_r["penalty"]
+            if ela_r.get("is_high_risk"):
+                global_is_high_risk = True
 
         return {
             "ok":                   True,
             "reason":               None,
             "warnings":             all_warnings,
             "authenticity_penalty": round(min(total_penalty, 0.60), 2),  # max 60% penalty
+            "is_high_risk":         global_is_high_risk,
         }
