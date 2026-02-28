@@ -1,142 +1,131 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useAccount, useWriteContract, usePublicClient } from "wagmi";
 import { pad } from "viem";
 import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
-import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS } from "../utils/constants";
+import { CONTRACTS } from "../utils/constants";
 
-const getOracleUrl = () => {
-  // Langsung ambil dari .env tanpa menebak hostname
-  return process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
-};
-
-const ORACLE_URL = getOracleUrl();
+const ORACLE_URL = process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
 const ORACLE_KEY = process.env.NEXT_PUBLIC_SATIN_API_KEY || "apex-dev-key";
 
 type Step = "form" | "uploading" | "oracle" | "onchain" | "success";
 type CaptureMode = "camera" | "gallery" | null;
 
-interface Form {
-  actionType: string; urgencyLevel: string; description: string;
-  effortHours: number; peopleHelped: number;
-  latitude: number; longitude: number; povertyIndex: number; ipfsCid: string;
+// ── What the AI deduced — shown to user for transparency ──────────────────────
+interface AIDeduced {
+  action_type:      string;
+  urgency_level:    string;
+  people_helped:    number;
+  effort_hours:     number;
+  confidence:       number;
+  scene_context:    string;
+  yolo_person_count: number;
+  fraud_indicators: string[];
+  reasoning:        string;
 }
 
 const STEPS = [
-  { key: "uploading", label: "IPFS Upload", icon: "◫" },
-  { key: "oracle", label: "Oracle Verify", icon: "◉" },
-  { key: "onchain", label: "On-chain Record", icon: "☍" },
+  { key: "uploading", label: "Preparing Evidence", icon: "◫" },
+  { key: "oracle",    label: "AI Analysis",         icon: "◉" },
+  { key: "onchain",  label: "On-chain Record",      icon: "☍" },
 ];
 
-const URGENCY_META: Record<string, { gradient: string; glow: string; bg: string; border: string }> = {
-  CRITICAL: { gradient: "linear-gradient(135deg,#7c6aff,#ff6eb4)", glow: "rgba(124,106,255,0.2)", bg: "rgba(124,106,255,0.07)", border: "rgba(124,106,255,0.2)" },
-  HIGH: { gradient: "linear-gradient(135deg,#ff6eb4,#ffbd59)", glow: "rgba(255,110,180,0.2)", bg: "rgba(255,110,180,0.07)", border: "rgba(255,110,180,0.2)" },
-  MEDIUM: { gradient: "linear-gradient(135deg,#ffbd59,#00dfb2)", glow: "rgba(255,189,89,0.2)", bg: "rgba(255,189,89,0.07)", border: "rgba(255,189,89,0.2)" },
-  LOW: { gradient: "linear-gradient(135deg,#00dfb2,#7c6aff)", glow: "rgba(0,223,178,0.2)", bg: "rgba(0,223,178,0.07)", border: "rgba(0,223,178,0.2)" },
+const ACTION_LABELS: Record<string, string> = {
+  FOOD_DISTRIBUTION:    "🍱 Distribusi Makanan",
+  MEDICAL_AID:          "🏥 Bantuan Medis",
+  SHELTER_CONSTRUCTION: "🏠 Konstruksi Shelter",
+  EDUCATION_SESSION:    "📚 Sesi Edukasi",
+  DISASTER_RELIEF:      "🚨 Tanggap Bencana",
+  CLEAN_WATER_PROJECT:  "💧 Air Bersih",
+  MENTAL_HEALTH_SUPPORT:"🧠 Kesehatan Mental",
+  ENVIRONMENTAL_ACTION: "🌱 Lingkungan",
 };
 
+const URGENCY_COLORS: Record<string, string> = {
+  CRITICAL: "#ff4d4d",
+  HIGH:     "#ff8c42",
+  MEDIUM:   "#ffbd59",
+  LOW:      "#00dfb2",
+};
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 const glassCard: React.CSSProperties = {
-  borderRadius: "16px",
+  borderRadius: "18px",
   border: "1px solid rgba(255,255,255,0.07)",
   background: "rgba(255,255,255,0.025)",
   overflow: "hidden",
 };
 
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: "10px", color: "rgba(255,255,255,0.35)",
-  textTransform: "uppercase", letterSpacing: "0.09em",
-  marginBottom: "9px",
-  fontFamily: "'JetBrains Mono',monospace", fontWeight: 600,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%", padding: "11px 14px",
-  borderRadius: "10px",
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  fontFamily: "'Plus Jakarta Sans', sans-serif",
-  fontSize: "13px", color: "#fff",
-  outline: "none", boxSizing: "border-box" as const,
-  transition: "border-color 0.2s",
+const monoLabel: React.CSSProperties = {
+  fontSize: "9px",
+  color: "rgba(255,255,255,0.3)",
+  textTransform: "uppercase",
+  letterSpacing: "0.12em",
+  fontFamily: "'JetBrains Mono', monospace",
+  fontWeight: 600,
 };
 
 export default function SubmitImpactForm() {
   const { address } = useAccount();
   const publicClient = usePublicClient();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef  = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const canvasRef= useRef<HTMLCanvasElement>(null);
+  const streamRef= useRef<MediaStream | null>(null);
 
-  const [file, setFile] = useState<File | null>(null);
-  const [step, setStep] = useState<Step>("form");
-  const [txHash, setTxHash] = useState("");
-  const [oracle, setOracle] = useState<any>(null);
-  const [error, setError] = useState("");
+  const [file, setFile]               = useState<File | null>(null);
+  const [step, setStep]               = useState<Step>("form");
+  const [txHash, setTxHash]           = useState("");
+  const [oracle, setOracle]           = useState<any>(null);
+  const [error, setError]             = useState("");
   const [captureMode, setCaptureMode] = useState<CaptureMode>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [captureTimestamp, setCaptureTimestamp] = useState<number | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl]   = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [form, setForm] = useState<Form>({
-    actionType: "FOOD_DISTRIBUTION", urgencyLevel: "HIGH",
-    description: "", effortHours: 4, peopleHelped: 10,
-    latitude: 0, longitude: 0, povertyIndex: 0.7, ipfsCid: "",
-  });
+  const [description, setDescription] = useState("");
+  const [gps, setGps]                 = useState({ latitude: 0, longitude: 0 });
+  const [pendingReview, setPendingReview] = useState(false);
+  const [checkingPending, setCheckingPending] = useState(true);
 
   const { writeContractAsync } = useWriteContract();
-  const busy = step !== "form";
+  const busy    = step !== "form";
   const stepIdx = STEPS.findIndex(s => s.key === step);
 
-  const [pendingReview, setPendingReview] = useState<boolean>(false);
-  const [checkingPending, setCheckingPending] = useState<boolean>(true);
-
-  // Check for existing pending community review
-  const checkPendingReview = async () => {
-    if (!address) {
-      setCheckingPending(false);
-      return;
-    }
+  // ── Check pending review ────────────────────────────────────────────────────
+  const checkPendingReview = useCallback(async () => {
+    if (!address) { setCheckingPending(false); return; }
     setCheckingPending(true);
     try {
-      const res = await fetch(`${ORACLE_URL}/api/v1/stream`, {
+      const res  = await fetch(`${ORACLE_URL}/api/v1/stream`, {
         headers: { "X-APEX-Oracle-Key": ORACLE_KEY },
       });
       const data = await res.json();
       const hasPending = data?.items?.some((item: any) =>
-        item.volunteer_address.toLowerCase() === address.toLowerCase() &&
+        item.volunteer_address?.toLowerCase() === address.toLowerCase() &&
         item.needs_community_review &&
         (!item.vote_info || item.vote_info.outcome === null)
       ) || false;
       setPendingReview(hasPending);
-    } catch (err) {
-      console.error("Failed to check stream", err);
-    } finally {
-      setCheckingPending(false);
-    }
-  };
-
-  useEffect(() => {
-    checkPendingReview();
+    } catch {}
+    finally { setCheckingPending(false); }
   }, [address]);
 
-  // ── Camera helpers ────────────────────────────────────────────────────────
+  useEffect(() => { checkPendingReview(); }, [checkPendingReview]);
+
+  // ── Camera ──────────────────────────────────────────────────────────────────
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     setCameraActive(false);
   };
 
-  // Assign srcObject AFTER React renders <video> into the DOM
   useEffect(() => {
-    if (cameraActive && videoRef.current && streamRef.current) {
+    if (cameraActive && videoRef.current && streamRef.current)
       videoRef.current.srcObject = streamRef.current;
-    }
   }, [cameraActive]);
 
-  // Generate / revoke object URL for image preview
   useEffect(() => {
     if (!file) { setPreviewUrl(null); return; }
     const url = URL.createObjectURL(file);
@@ -144,62 +133,48 @@ export default function SubmitImpactForm() {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-
-
   const openCamera = async () => {
-    // ── FALLBACK: Insecure Context (HTTP over IP) ───────────────────────────
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      if (fileRef.current) {
-        // Force image-only to help the browser choose the camera application
-        fileRef.current.setAttribute("accept", "image/*");
-        fileRef.current.setAttribute("capture", "environment");
-        fileRef.current.click();
-        setCaptureMode("camera");
-      }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      fileRef.current?.setAttribute("accept", "image/*");
+      fileRef.current?.setAttribute("capture", "environment");
+      fileRef.current?.click();
+      setCaptureMode("camera");
       return;
     }
-    // ────────────────────────────────────────────────────────────────────────
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       streamRef.current = stream;
       setCaptureMode("camera");
-      setCameraActive(true); // <video> mounts → useEffect assigns srcObject
+      setCameraActive(true);
       setFile(null);
     } catch {
-      setError("Tidak dapat mengakses kamera. Izinkan akses kamera di browser.");
+      setError("Tidak dapat mengakses kamera.");
     }
   };
 
   const capturePhoto = () => {
-    const video = videoRef.current;
+    const video  = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    const now = Date.now();
-    canvas.width = video.videoWidth;
+    const now   = Date.now();
+    canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0);
-
-    // ── Invisible cryptographic timestamp watermark ─────────────────────────
-    // Tiny, low-opacity text in the bottom-right corner.
-    // Virtually invisible to the human eye but readable by oracle/forensics.
-    const ts = new Date(now).toISOString(); // e.g. "2026-02-27T21:40:00.000Z"
-    const label = `APEX:${ts}`;
-    const fontSize = Math.max(10, Math.floor(canvas.width * 0.012));
-    ctx.font = `${fontSize}px monospace`;
+    // Invisible timestamp watermark
+    const ts    = new Date(now).toISOString();
+    const fs    = Math.max(10, Math.floor(canvas.width * 0.012));
+    ctx.font    = `${fs}px monospace`;
     ctx.globalAlpha = 0.18;
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "right";
+    ctx.fillStyle   = "#fff";
+    ctx.textAlign   = "right";
     ctx.textBaseline = "bottom";
-    ctx.fillText(label, canvas.width - 8, canvas.height - 6);
+    ctx.fillText(`APEX:${ts}`, canvas.width - 8, canvas.height - 6);
     ctx.globalAlpha = 1.0;
-    // ───────────────────────────────────────────────────────────────────────
-
     canvas.toBlob(blob => {
       if (!blob) return;
-      const captured = new File([blob], `apex-capture-${now}.jpg`, { type: "image/jpeg" });
+      const captured = new File([blob], `apex-${now}.jpg`, { type: "image/jpeg" });
       setCaptureTimestamp(now);
       setFile(captured);
       setError("");
@@ -210,161 +185,128 @@ export default function SubmitImpactForm() {
   const selectGallery = () => {
     stopCamera();
     setCaptureMode("gallery");
-    if (fileRef.current) {
-      fileRef.current.setAttribute("accept", "image/*,video/*");
-      fileRef.current.removeAttribute("capture");
-      fileRef.current.click();
-    }
+    fileRef.current?.setAttribute("accept", "image/*,video/*");
+    fileRef.current?.removeAttribute("capture");
+    fileRef.current?.click();
   };
 
-  // ── Helper: real SHA-256 with fallback for non-secure contexts ────────────
+  // ── Helpers ─────────────────────────────────────────────────────────────────
   const sha256Hex = async (buf: ArrayBuffer): Promise<string> => {
-    // Check if we are in a secure context (HTTPS/localhost) for SubtleCrypto
-    if (window.crypto && window.crypto.subtle) {
+    if (window.crypto?.subtle) {
       try {
-        const digest = await crypto.subtle.digest("SHA-256", buf);
-        return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
-      } catch (e) {
-        console.warn("SubtleCrypto failed, using fallback hash", e);
-      }
+        const d = await crypto.subtle.digest("SHA-256", buf);
+        return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2,"0")).join("");
+      } catch {}
     }
-
-    // Simple JS Hashing fallback (FNV-1a based) for development over HTTP IP
-    // Note: In production, HTTPS is required for real SHA-256.
-    const view = new Uint8Array(buf);
-    let h1 = 0x811c9dc5;
-    for (let i = 0; i < view.length; i++) {
-      h1 ^= view[i];
-      h1 = Math.imul(h1, 0x01000193);
-    }
-    // Return a 64-char string to match SHA-256 length expectations
-    const hex = (h1 >>> 0).toString(16).padStart(8, "0");
-    return hex.repeat(8);
+    const v = new Uint8Array(buf);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < v.length; i++) { h ^= v[i]; h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(16).padStart(8,"0").repeat(8);
   };
 
-  // ── Helper: client-side image resize + compress to base64 ─────────────────
-  // v1.2.0: Resize to max 1024×1024, JPEG quality 0.82, max ~500 KB.
-  // Sends ~80% less data to Oracle while preserving enough detail for YOLOv8.
   const resizeImageToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
-      const MAX_DIM = 1024;
-      const MAX_KB = 500;
-
       const img = new Image();
       const url = URL.createObjectURL(file);
-
       img.onload = () => {
         URL.revokeObjectURL(url);
-
-        // Compute scaled dimensions
         let { naturalWidth: w, naturalHeight: h } = img;
-        if (w > MAX_DIM || h > MAX_DIM) {
-          const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
-          w = Math.round(w * ratio);
-          h = Math.round(h * ratio);
-        }
-
+        const MAX = 1024;
+        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w=Math.round(w*r); h=Math.round(h*r); }
         const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext("2d");
         if (!ctx) return reject(new Error("Canvas not supported"));
         ctx.drawImage(img, 0, 0, w, h);
-
-        // Compress until within size limit
-        let quality = 0.82;
+        let q = 0.82;
         const tryCompress = () => {
-          const dataUrl = canvas.toDataURL("image/jpeg", quality);
-          const base64 = dataUrl.split(",")[1];
-          const sizeKB = (base64.length * 0.75) / 1024;  // approx decoded bytes
-          if (sizeKB <= MAX_KB || quality < 0.4) {
-            resolve(base64);
-          } else {
-            quality -= 0.1;
-            tryCompress();
-          }
+          const d  = canvas.toDataURL("image/jpeg", q);
+          const b64 = d.split(",")[1];
+          if ((b64.length * 0.75 / 1024) <= 500 || q < 0.4) resolve(b64);
+          else { q -= 0.1; tryCompress(); }
         };
         tryCompress();
       };
-
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        // Fallback: read raw without resize
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(",")[1]);
-        reader.onerror = () => reject(new Error("Failed to read file"));
-        reader.readAsDataURL(file);
+        const r = new FileReader();
+        r.onload = () => resolve((r.result as string).split(",")[1]);
+        r.onerror = () => reject(new Error("Failed to read file"));
+        r.readAsDataURL(file);
       };
-
       img.src = url;
     });
 
+  // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     const source = captureMode === "camera" ? "live_capture" : "gallery";
+
     try {
       setStep("uploading");
-
       let hash_sha256 = "0".repeat(64);
-      let cid = "text-only-submission";
+      let cid         = "text-only-submission";
 
       if (file) {
-        const buf = await file.arrayBuffer();
-        hash_sha256 = await sha256Hex(buf);
-        cid = `sha256://${hash_sha256}`;
+        const buf    = await file.arrayBuffer();
+        hash_sha256  = await sha256Hex(buf);
+        cid          = `sha256://${hash_sha256}`;
       }
 
       setStep("oracle");
       let image_base64: string | null = null;
-      if (file) {
-        // v1.2.0: resize + compress client-side before sending to Oracle
-        image_base64 = await resizeImageToBase64(file);
-      }
+      if (file) image_base64 = await resizeImageToBase64(file);
 
+      // v2.0 — Request sangat simpel: hanya deskripsi + GPS + foto
+      // TIDAK ada action_type, urgency, effort_hours, people_helped dari user
       const resp = await fetch(`${ORACLE_URL}/api/v1/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-APEX-Oracle-Key": ORACLE_KEY },
         body: JSON.stringify({
-          ipfs_cid: cid, evidence_type: file ? "image" : "text",
+          description:         description,
+          gps:                 { latitude: gps.latitude, longitude: gps.longitude, accuracy_meters: 10 },
+          volunteer_address:   address,
+          beneficiary_address: address,
           hash_sha256,
-          gps: { latitude: form.latitude, longitude: form.longitude, accuracy_meters: 10 },
-          action_type: form.actionType, people_helped: form.peopleHelped,
-          urgency_level: form.urgencyLevel, effort_hours: form.effortHours,
-          volunteer_address: address, beneficiary_address: address,
-          country_iso: "ID", description: form.description, image_base64,
-          source,                                           // ← live_capture | gallery
-          capture_timestamp: captureTimestamp ?? null,      // ← unix ms of live capture
+          ipfs_cid:            cid,
+          evidence_type:       file ? "image" : "text",
+          source,
+          capture_timestamp:   captureTimestamp ?? null,
+          image_base64,
+          country_iso:         "ID",
         }),
       });
+
       if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || "Oracle failed"); }
       const real = await resp.json();
       setOracle(real);
 
       setStep("onchain");
-      // ── Community review: skip contract call ────────────────────────────────
       if (real.needs_community_review) {
-        setTxHash("");          // no on-chain tx
+        setTxHash("");
         setStep("success");
         stopCamera();
         return;
       }
 
-      // ── Normal flow: submit on-chain ─────────────────────────────────────────
       const ca = real.contract_args;
       if (!address || !CONTRACTS.BENEVOLENCE_VAULT) throw new Error("Wallet not connected");
 
       const hash = await writeContractAsync({
         address: CONTRACTS.BENEVOLENCE_VAULT as `0x${string}`,
-        abi: BENEVOLENCE_VAULT_ABI, functionName: "releaseReward",
+        abi: BENEVOLENCE_VAULT_ABI,
+        functionName: "releaseReward",
         args: [
           pad(`0x${real.event_id.replace(/-/g, "")}` as `0x${string}`, { size: 32 }),
           address as `0x${string}`,
           (ca.beneficiaryAddress ?? address) as `0x${string}`,
-          BigInt(ca.impactScoreScaled), BigInt(ca.tokenRewardWei),
+          BigInt(ca.impactScoreScaled),
+          BigInt(ca.tokenRewardWei),
           pad(`0x${real.zk_proof_hash.replace("0x", "")}` as `0x${string}`, { size: 32 }),
           pad(`0x${real.event_hash.replace("0x", "")}` as `0x${string}`, { size: 32 }),
-          real.nonce, BigInt(real.expires_at),
+          real.nonce,
+          BigInt(real.expires_at),
           Number(real.signature.v),
           real.signature.r as `0x${string}`,
           real.signature.s as `0x${string}`,
@@ -374,7 +316,7 @@ export default function SubmitImpactForm() {
 
       if (publicClient) {
         const receipt = await publicClient.waitForTransactionReceipt({ hash });
-        if (receipt.status !== "success") throw new Error("Transaction reverted by contract.");
+        if (receipt.status !== "success") throw new Error("Transaction reverted.");
       }
 
       setTxHash(hash);
@@ -388,102 +330,108 @@ export default function SubmitImpactForm() {
     }
   };
 
-  /* ── Success screen ── */
+  // ── UI Helpers ───────────────────────────────────────────────────────────────
   const isCommunityReview = step === "success" && !txHash;
+  const deduced: AIDeduced | null = oracle?.ai_deduced || null;
+
+  /* ────────────────────────────────────────────────────────────────────────── */
+  /* SUCCESS SCREEN                                                             */
+  /* ────────────────────────────────────────────────────────────────────────── */
   if (step === "success") return (
     <div style={{ maxWidth: "480px" }}>
       <div style={{ ...glassCard, position: "relative" }}>
         <div style={{
-          height: "2px", background: isCommunityReview
-            ? "linear-gradient(90deg,#ffbd59,#ff6eb4)"
-            : "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59,#ff6eb4)"
-        }} />
-        {/* Glow */}
-        <div style={{
-          position: "absolute", top: "-40px", left: "50%", transform: "translateX(-50%)",
-          width: "200px", height: "200px", borderRadius: "50%",
+          height: "2px",
           background: isCommunityReview
-            ? "radial-gradient(circle,rgba(255,189,89,0.12) 0%,transparent 70%)"
-            : "radial-gradient(circle,rgba(0,223,178,0.1) 0%,transparent 70%)",
-          pointerEvents: "none",
+            ? "linear-gradient(90deg,#ffbd59,#ff6eb4)"
+            : "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59)"
         }} />
-        <div style={{ padding: "40px 36px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "22px", position: "relative" }}>
+        <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", gap: "20px", alignItems: "center", textAlign: "center" }}>
+          {/* Icon */}
           <div style={{
-            width: "60px", height: "60px", borderRadius: "18px",
+            width: 56, height: 56, borderRadius: 16,
             background: isCommunityReview ? "rgba(255,189,89,0.1)" : "rgba(0,223,178,0.1)",
             border: `1px solid ${isCommunityReview ? "rgba(255,189,89,0.25)" : "rgba(0,223,178,0.2)"}`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "26px", color: isCommunityReview ? "#ffbd59" : "#00dfb2",
-            boxShadow: isCommunityReview ? "0 0 30px rgba(255,189,89,0.2)" : "0 0 30px rgba(0,223,178,0.2)",
-          }}>{isCommunityReview ? "⌬" : "✓"}</div>
+            fontSize: 24, color: isCommunityReview ? "#ffbd59" : "#00dfb2",
+          }}>
+            {isCommunityReview ? "⌬" : "✓"}
+          </div>
 
           <div>
-            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff", marginBottom: "8px" }}>
+            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: 20, color: "#fff", marginBottom: 8 }}>
               {isCommunityReview ? "Menunggu Verifikasi Komunitas" : "Impact Verified!"}
             </p>
-            <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
               {isCommunityReview
-                ? "AI SATIN ragu dengan foto ini. Submission kamu sudah masuk ke Community Stream untuk divoting komunitas. Cek tab 🔴 Community Stream untuk melihat progresnya."
-                : "Your action was verified by AI and recorded on the Reputation Ledger."}
+                ? "AI SATIN kurang yakin dengan bukti ini. Submission masuk Community Stream untuk divoting."
+                : "Tindakanmu telah diverifikasi AI dan dicatat di Reputation Ledger."}
             </p>
           </div>
 
-          {oracle && (
-            <div style={{ width: "100%", borderRadius: "12px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", overflow: "hidden" }}>
-              <div style={{ height: "1px", background: "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59,#ff6eb4)" }} />
-              <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px" }}>
+          {/* Score breakdown */}
+          {oracle && !isCommunityReview && (
+            <div style={{ width: "100%", ...glassCard }}>
+              <div style={{ height: 1, background: "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59)" }} />
+              <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
                 {[
-                  { label: "Impact Score", value: `${oracle.impact_score}/100`, gradient: "linear-gradient(90deg,#00dfb2,#7c6aff)" },
-                  { label: "AI Confidence", value: `${((oracle?.ai_confidence || 0) * 100).toFixed(1)}%`, gradient: "linear-gradient(90deg,#7c6aff,#ff6eb4)" },
-                  { label: "APEX Earned", value: `${oracle.token_reward.toFixed(2)} APEX`, gradient: "linear-gradient(90deg,#ffbd59,#ff6eb4)" },
+                  { label: "Impact Score", value: `${oracle.impact_score?.toFixed(1)}/100`, g: "linear-gradient(90deg,#00dfb2,#7c6aff)" },
+                  { label: "AI Confidence", value: `${((oracle.ai_confidence||0)*100).toFixed(1)}%`, g: "linear-gradient(90deg,#7c6aff,#ff6eb4)" },
+                  { label: "APEX Earned", value: `${oracle.token_reward?.toFixed(2)} APEX`, g: "linear-gradient(90deg,#ffbd59,#ff6eb4)" },
                 ].map(s => (
                   <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)" }}>{s.label}</p>
-                    <p style={{
-                      fontFamily: "'JetBrains Mono',monospace", fontSize: "15px", fontWeight: 700,
-                      background: s.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                    }}>{s.value}</p>
+                    <span style={{ ...monoLabel }}>{s.label}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 15, fontWeight: 700, background: s.g, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                      {s.value}
+                    </span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Integrity warnings */}
-          {oracle?.integrity_warnings?.length > 0 && (
-            <div style={{
-              width: "100%", padding: "12px 16px", borderRadius: "10px",
-              background: "rgba(255,189,89,0.06)", border: "1px solid rgba(255,189,89,0.2)",
-              fontSize: "11px", color: "rgba(255,189,89,0.8)", lineHeight: 1.7,
-              fontFamily: "'JetBrains Mono',monospace",
-            }}>
-              FLAG Integrity notes: {oracle.integrity_warnings.join(" · ")}
-              {oracle.authenticity_penalty > 0 && (
-                <span style={{ display: "block", marginTop: "4px", opacity: 0.7 }}>
-                  Score adjusted by −{(oracle.authenticity_penalty * 100).toFixed(0)}% due to integrity flags.
+          {/* AI Deduction reveal — transparent to user */}
+          {deduced && (
+            <div style={{ width: "100%", borderRadius: 12, background: "rgba(124,106,255,0.04)", border: "1px solid rgba(124,106,255,0.15)", overflow: "hidden" }}>
+              <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(124,106,255,0.1)", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, color: "rgba(124,106,255,0.7)", fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, letterSpacing: "0.1em" }}>
+                  ◉ AI DEDUCTION REPORT
                 </span>
-              )}
+              </div>
+              <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <AIDeductedRow label="Action Type" value={ACTION_LABELS[deduced.action_type] || deduced.action_type} />
+                <AIDeductedRow label="Urgency" value={deduced.urgency_level} color={URGENCY_COLORS[deduced.urgency_level]} />
+                <AIDeductedRow label="People Helped" value={`${deduced.people_helped} orang`} />
+                <AIDeductedRow label="Effort" value={`${deduced.effort_hours}h`} />
+                <AIDeductedRow label="YOLO Count" value={`${deduced.yolo_person_count} terlihat di foto`} />
+                <AIDeductedRow label="Confidence" value={`${(deduced.confidence * 100).toFixed(0)}%`} />
+                {deduced.scene_context && (
+                  <div style={{ marginTop: 4, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <p style={{ ...monoLabel, marginBottom: 4 }}>AI Scene Analysis</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
+                      {deduced.scene_context}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
           {txHash && (
-            <p style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: "11px", color: "rgba(124,106,255,0.5)" }}>
-              TX: {txHash.slice(0, 14)}…{txHash.slice(-8)}
+            <p style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "rgba(124,106,255,0.4)" }}>
+              TX: {txHash.slice(0,14)}…{txHash.slice(-8)}
             </p>
           )}
 
           <button
-            onClick={() => { setStep("form"); setFile(null); setOracle(null); setTxHash(""); setCaptureMode(null); setCaptureTimestamp(null); checkPendingReview(); }}
+            onClick={() => { setStep("form"); setFile(null); setOracle(null); setTxHash(""); setCaptureMode(null); setCaptureTimestamp(null); setDescription(""); checkPendingReview(); }}
             style={{
-              width: "100%", padding: "14px", borderRadius: "12px", border: "none",
+              width: "100%", padding: "14px", borderRadius: 12, border: "none",
               background: "linear-gradient(135deg,#00dfb2,#7c6aff)",
               fontFamily: "'Plus Jakarta Sans',sans-serif",
-              fontSize: "14px", fontWeight: 800, color: "#0a0510",
+              fontSize: 14, fontWeight: 800, color: "#0a0510",
               cursor: "pointer", boxShadow: "0 4px 20px rgba(0,223,178,0.25)",
-              transition: "transform 0.2s",
-            }}
-            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"}
-            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0)"}
-          >
+            }}>
             Submit Another Proof →
           </button>
         </div>
@@ -491,408 +439,214 @@ export default function SubmitImpactForm() {
     </div>
   );
 
-  /* ── Processing screen ── */
+  /* ────────────────────────────────────────────────────────────────────────── */
+  /* PROCESSING SCREEN                                                          */
+  /* ────────────────────────────────────────────────────────────────────────── */
   if (busy) return (
     <div style={{ maxWidth: "480px" }}>
       <div style={{ ...glassCard }}>
         <div style={{ height: "2px", background: "linear-gradient(90deg,#00dfb2,#7c6aff,#ffbd59,#ff6eb4)", backgroundSize: "200% 100%", animation: "shimmer 2s linear infinite" }} />
-        <div style={{ padding: "40px 36px", display: "flex", flexDirection: "column", alignItems: "center", gap: "28px" }}>
-          <div>
-            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "20px", color: "#fff", textAlign: "center", marginBottom: "6px" }}>
-              Processing…
+        <div style={{ padding: "40px 32px", display: "flex", flexDirection: "column", gap: 24 }}>
+          <div style={{ textAlign: "center" }}>
+            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: 20, color: "#fff", marginBottom: 6 }}>
+              {step === "oracle" ? "AI sedang menganalisis..." : "Memproses..."}
             </p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", textAlign: "center" }}>Please keep this tab open</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+              {step === "oracle" ? "YOLOv8m + LLaVA membaca fotomu" : "Please keep this tab open"}
+            </p>
           </div>
-
-          {/* Steps */}
-          <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {STEPS.map((s, i) => {
-              const done = stepIdx > i;
+              const done   = stepIdx > i;
               const active = stepIdx === i;
-              const pending = stepIdx < i;
               return (
                 <div key={s.key} style={{
-                  display: "flex", alignItems: "center", gap: "14px",
-                  padding: "14px 18px", borderRadius: "12px",
-                  background: active ? "rgba(0,223,178,0.06)"
-                    : done ? "rgba(255,255,255,0.02)"
-                      : "rgba(255,255,255,0.015)",
-                  border: `1px solid ${active ? "rgba(0,223,178,0.18)" : "rgba(255,255,255,0.05)"}`,
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "14px 16px", borderRadius: 12,
+                  background: active ? "rgba(124,106,255,0.06)" : done ? "rgba(0,223,178,0.03)" : "rgba(255,255,255,0.01)",
+                  border: `1px solid ${active ? "rgba(124,106,255,0.2)" : done ? "rgba(0,223,178,0.1)" : "rgba(255,255,255,0.04)"}`,
                   transition: "all 0.3s",
                 }}>
                   <div style={{
-                    width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
-                    background: done ? "rgba(0,223,178,0.12)"
-                      : active ? "rgba(0,223,178,0.08)"
-                        : "rgba(255,255,255,0.03)",
-                    border: `1px solid ${done || active ? "rgba(0,223,178,0.2)" : "rgba(255,255,255,0.06)"}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: "16px",
+                    width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+                    background: done ? "rgba(0,223,178,0.1)" : active ? "rgba(124,106,255,0.1)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${done ? "rgba(0,223,178,0.2)" : active ? "rgba(124,106,255,0.25)" : "rgba(255,255,255,0.05)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
+                    color: done ? "#00dfb2" : active ? "#7c6aff" : "rgba(255,255,255,0.2)",
                   }}>
                     {done ? "✓" : active ? <span style={{ animation: "spin 1s linear infinite", display: "block" }}>⟳</span> : s.icon}
                   </div>
                   <div>
-                    <p style={{
-                      fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700,
-                      fontSize: "13px",
-                      color: done || active ? "#fff" : "rgba(255,255,255,0.3)",
-                    }}>{s.label}</p>
-                    <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", marginTop: "2px" }}>
-                      {done ? "Complete" : active ? "In progress…" : "Pending"}
+                    <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: 13, color: done || active ? "#fff" : "rgba(255,255,255,0.25)" }}>{s.label}</p>
+                    <p style={{ fontSize: 9, color: "rgba(255,255,255,0.2)", marginTop: 2, fontFamily: "'JetBrains Mono',monospace" }}>
+                      {done ? "COMPLETE" : active ? "IN PROGRESS" : "PENDING"}
                     </p>
                   </div>
-                  {done && (
-                    <div style={{ marginLeft: "auto" }}>
-                      <span style={{
-                        padding: "3px 9px", borderRadius: "6px",
-                        background: "rgba(0,223,178,0.1)", border: "1px solid rgba(0,223,178,0.2)",
-                        fontSize: "9px", fontWeight: 700, color: "#00dfb2",
-                        fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.08em",
-                      }}>DONE</span>
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
+          {/* AI analysis hint */}
+          {step === "oracle" && (
+            <div style={{ padding: "12px 16px", borderRadius: 10, background: "rgba(124,106,255,0.05)", border: "1px solid rgba(124,106,255,0.12)", display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>◉</span>
+              <p style={{ fontSize: 11, color: "rgba(124,106,255,0.7)", lineHeight: 1.6, fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
+                AI sedang menentukan action type, jumlah orang terbantu, durasi effort, dan tingkat urgensi secara otomatis dari fotomu.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
-  /* ── Pending Review screen ── */
-  if (checkingPending) return (
-    <div style={{ maxWidth: "480px", color: "rgba(255,255,255,0.4)", textAlign: "center", padding: "40px 0", fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
-      Checking status...
-    </div>
-  );
+
+  /* ────────────────────────────────────────────────────────────────────────── */
+  /* PENDING REVIEW                                                             */
+  /* ────────────────────────────────────────────────────────────────────────── */
+  if (checkingPending) return <div style={{ maxWidth: 480, color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "40px 0", fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: 13 }}>Checking status...</div>;
 
   if (pendingReview) return (
-    <div style={{ maxWidth: "480px" }}>
-      <div style={{ ...glassCard, position: "relative" }}>
+    <div style={{ maxWidth: 480 }}>
+      <div style={{ ...glassCard }}>
         <div style={{ height: "2px", background: "linear-gradient(90deg,#ffbd59,#ff6eb4)" }} />
-        <div style={{ padding: "40px 36px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "22px" }}>
-          <div style={{
-            width: "60px", height: "60px", borderRadius: "18px",
-            background: "rgba(255,189,89,0.1)",
-            border: "1px solid rgba(255,189,89,0.25)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "26px", color: "#ffbd59",
-            boxShadow: "0 0 30px rgba(255,189,89,0.2)",
-          }}>⌬</div>
+        <div style={{ padding: "40px 32px", textAlign: "center", display: "flex", flexDirection: "column", gap: 16, alignItems: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(255,189,89,0.1)", border: "1px solid rgba(255,189,89,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#ffbd59" }}>⌬</div>
           <div>
-            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff", marginBottom: "8px" }}>
-              Submission Sedang Divoting
-            </p>
-            <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
-              Kamu masih memiliki submission yang berstatus <b>Pending Community Review</b>. Silakan tunggu hingga hasil voting selesai (dan klaim reward jika disetujui) sebelum mengirimkan submission baru.
-            </p>
+            <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: 20, color: "#fff", marginBottom: 8 }}>Submission Sedang Divoting</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>Kamu masih memiliki submission yang pending Community Review. Tunggu hingga selesai sebelum submit baru.</p>
           </div>
         </div>
       </div>
     </div>
   );
 
-  /* ── Main form ── */
+  /* ────────────────────────────────────────────────────────────────────────── */
+  /* MAIN FORM — Radically simplified                                           */
+  /* ────────────────────────────────────────────────────────────────────────── */
+  const canSubmit = description.trim().length >= 20 && termsAccepted && !busy;
+
   return (
-    <div style={{ maxWidth: "620px" }}>
-      <div style={{ marginBottom: "24px" }}>
-        <p style={{
-          fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em",
-          fontFamily: "'JetBrains Mono',monospace", fontWeight: 600,
-          background: "linear-gradient(90deg,#00dfb2,#7c6aff)",
-          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-          marginBottom: "6px",
-        }}>Submit Impact Proof</p>
-        <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: "22px", color: "#fff" }}>
+    <div style={{ maxWidth: 560 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <p style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'JetBrains Mono',monospace", fontWeight: 600, background: "linear-gradient(90deg,#00dfb2,#7c6aff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 6 }}>
+          Submit Impact Proof v2.0 · Autonomous AI Deduction
+        </p>
+        <p style={{ fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: 22, color: "#fff", marginBottom: 8 }}>
           Record Your Good Deed
         </p>
+        {/* AAD explanation badge */}
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 8, background: "rgba(0,223,178,0.06)", border: "1px solid rgba(0,223,178,0.15)" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#00dfb2", flexShrink: 0 }} />
+          <p style={{ fontSize: 11, color: "rgba(0,223,178,0.8)", fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
+            AI otomatis menentukan kategori, urgency & jumlah orang dari fotomu
+          </p>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Action Type */}
-          <div style={{ ...glassCard, padding: "20px 22px" }}>
-            <label style={labelStyle}>Action Type</label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "7px" }}>
-              {ACTION_TYPES.map((a: { value: string; label: string }) => {
-                const active = form.actionType === a.value;
-                return (
-                  <button key={a.value} type="button"
-                    onClick={() => setForm(f => ({ ...f, actionType: a.value }))}
-                    style={{
-                      padding: "9px 10px", borderRadius: "9px",
-                      background: active ? "rgba(0,223,178,0.07)" : "rgba(255,255,255,0.02)",
-                      border: `1px solid ${active ? "rgba(0,223,178,0.2)" : "rgba(255,255,255,0.06)"}`,
-                      fontFamily: "'Plus Jakarta Sans',sans-serif",
-                      fontSize: "11px", fontWeight: active ? 700 : 400,
-                      color: active ? "#00dfb2" : "rgba(255,255,255,0.35)",
-                      cursor: "pointer", transition: "all 0.15s", textAlign: "left" as const,
-                    }}>
-                    {a.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Urgency Level */}
-          <div style={{ ...glassCard, padding: "20px 22px" }}>
-            <label style={labelStyle}>Urgency Level</label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
-              {URGENCY_LEVELS.map((u: { value: string; label: string }) => {
-                const active = form.urgencyLevel === u.value;
-                const m = URGENCY_META[u.value] || URGENCY_META.MEDIUM;
-                return (
-                  <button key={u.value} type="button"
-                    onClick={() => setForm(f => ({ ...f, urgencyLevel: u.value }))}
-                    style={{
-                      padding: "10px 6px", borderRadius: "10px",
-                      background: active ? m.bg : "rgba(255,255,255,0.02)",
-                      border: `1px solid ${active ? m.border : "rgba(255,255,255,0.06)"}`,
-                      fontFamily: "'Plus Jakarta Sans',sans-serif",
-                      fontSize: "12px", fontWeight: active ? 800 : 400,
-                      color: active ? "transparent" : "rgba(255,255,255,0.3)",
-                      background2: active ? m.gradient : "none",
-                      ...(active ? {
-                        backgroundImage: m.gradient,
-                        WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                      } : {}),
-                      cursor: "pointer", transition: "all 0.15s",
-                      boxShadow: active ? `0 2px 12px ${m.glow}` : "none",
-                    } as any}>
-                    {u.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Description */}
-          <div style={{ ...glassCard, padding: "20px 22px" }}>
-            <label style={labelStyle}>Impact Description</label>
-            <textarea value={form.description}
-              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-              rows={4} required
-              placeholder="Describe the beneficial action. The AI analyzes this for impact scoring…"
-              style={{
-                ...inputStyle,
-                resize: "none", lineHeight: 1.65,
-                fontFamily: "'Plus Jakarta Sans',sans-serif",
-              }}
-              onFocus={e => (e.target as HTMLTextAreaElement).style.borderColor = "rgba(255,255,255,0.2)"}
-              onBlur={e => (e.target as HTMLTextAreaElement).style.borderColor = "rgba(255,255,255,0.08)"}
-            />
-          </div>
-
-          {/* Sliders */}
-          <div style={{ ...glassCard, padding: "20px 22px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-              {[
-                { key: "effortHours", label: "Effort Hours", min: 0.5, max: 72, step: 0.5, unit: "h", val: form.effortHours, gradient: "linear-gradient(90deg,#7c6aff,#ff6eb4)" },
-                { key: "peopleHelped", label: "People Helped", min: 1, max: 500, step: 1, unit: "", val: form.peopleHelped, gradient: "linear-gradient(90deg,#00dfb2,#7c6aff)" },
-              ].map(sl => (
-                <div key={sl.key}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                    <label style={{ ...labelStyle, marginBottom: 0 }}>{sl.label}</label>
-                    <span style={{
-                      fontFamily: "'JetBrains Mono',monospace", fontSize: "13px", fontWeight: 700,
-                      background: sl.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                    }}>{sl.val}{sl.unit}</span>
-                  </div>
-                  <input type="range" min={sl.min} max={sl.max} step={sl.step}
-                    value={sl.val}
-                    onChange={e => setForm(f => ({ ...f, [sl.key]: Number(e.target.value) }))}
-                    style={{ width: "100%", accentColor: "#00dfb2", cursor: "pointer" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
-                    <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{sl.min}{sl.unit}</span>
-                    <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{sl.max}{sl.unit}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* GPS */}
-          <div style={{ ...glassCard, padding: "20px 22px" }}>
-            <label style={labelStyle}>GPS Coordinates</label>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {[
-                { ph: "Latitude", key: "latitude", val: form.latitude },
-                { ph: "Longitude", key: "longitude", val: form.longitude },
-              ].map(inp => (
-                <input key={inp.key} type="number" placeholder={inp.ph} step="any"
-                  value={inp.val || ""}
-                  onChange={e => setForm(f => ({ ...f, [inp.key]: Number(e.target.value) }))}
-                  style={{ ...inputStyle, fontFamily: "'JetBrains Mono',monospace", fontSize: "12px" }}
-                  onFocus={e => (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.2)"}
-                  onBlur={e => (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"}
-                />
-              ))}
-              <button type="button"
-                onClick={() => navigator.geolocation.getCurrentPosition(
-                  p => setForm(f => ({ ...f, latitude: p.coords.latitude, longitude: p.coords.longitude })),
-                  () => setError("Could not get location.")
-                )}
-                style={{
-                  padding: "11px 14px", borderRadius: "10px", flexShrink: 0,
-                  background: "rgba(0,223,178,0.06)", border: "1px solid rgba(0,223,178,0.15)",
-                  fontFamily: "'Plus Jakarta Sans',sans-serif",
-                  fontSize: "12px", color: "#00dfb2",
-                  cursor: "pointer", whiteSpace: "nowrap" as const, fontWeight: 600,
-                  transition: "all 0.15s",
-                }}
-                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.1)"}
-                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,223,178,0.06)"}
-              >
-                ⌖ Auto
-              </button>
-            </div>
+        {/* Description — Natural language, satu-satunya input scoring */}
+        <div style={{ ...glassCard, padding: "20px 22px" }}>
+          <label style={{ display: "block", marginBottom: 10 }}>
+            <span style={{ ...monoLabel, display: "block", marginBottom: 6 }}>
+              Ceritakan Kegiatanmu ✦ Satu-satunya input yang kamu isi
+            </span>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'Plus Jakarta Sans',sans-serif", lineHeight: 1.6 }}>
+              Tulis secara natural — AI akan membaca dan menyimpulkan semua parameter secara otomatis. Tidak perlu pilih kategori atau isi slider.
+            </p>
+          </label>
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            rows={5}
+            required
+            placeholder="Contoh: 'Hari ini aku dan 5 teman membagikan 200 paket sembako kepada warga terdampak banjir di Bekasi. Kegiatan berlangsung sekitar 6 jam dari pagi hingga sore...'"
+            style={{
+              width: "100%", padding: "13px 16px",
+              borderRadius: 10,
+              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${description.length >= 20 ? "rgba(0,223,178,0.2)" : "rgba(255,255,255,0.08)"}`,
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+              fontSize: 13, color: "#fff",
+              outline: "none", boxSizing: "border-box" as const,
+              resize: "none", lineHeight: 1.7,
+              transition: "border-color 0.2s",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+            <p style={{ fontSize: 10, color: description.length >= 20 ? "rgba(0,223,178,0.5)" : "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>
+              {description.length >= 20 ? "✓ Cukup panjang untuk dianalisis AI" : `Min 20 karakter (${description.length})`}
+            </p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>{description.length} chars</p>
           </div>
         </div>
 
-        {/* Evidence Capture — Camera vs Gallery */}
+        {/* Evidence Photo */}
         <div style={{ ...glassCard, overflow: "hidden" }}>
-          <div style={{ padding: "16px 22px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-            <label style={labelStyle}>Evidence Photo</label>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {/* Live Camera */}
-              <button type="button" onClick={openCamera} disabled={busy}
-                style={{
-                  flex: 1, padding: "11px 10px", borderRadius: "10px",
-                  background: captureMode === "camera" ? "rgba(0,223,178,0.08)" : "rgba(255,255,255,0.03)",
-                  border: `1px solid ${captureMode === "camera" ? "rgba(0,223,178,0.3)" : "rgba(255,255,255,0.08)"}`,
-                  color: captureMode === "camera" ? "#00dfb2" : "rgba(255,255,255,0.5)",
-                  fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 700,
-                  cursor: "pointer", transition: "all 0.15s",
-                }}>
+          <div style={{ padding: "16px 22px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+            <span style={{ ...monoLabel, display: "block", marginBottom: 10 }}>Foto Bukti</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={openCamera} disabled={busy} style={{
+                flex: 1, padding: "12px 10px", borderRadius: 10,
+                background: captureMode === "camera" ? "rgba(0,223,178,0.08)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${captureMode === "camera" ? "rgba(0,223,178,0.3)" : "rgba(255,255,255,0.07)"}`,
+                color: captureMode === "camera" ? "#00dfb2" : "rgba(255,255,255,0.45)",
+                fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: 12, fontWeight: 700,
+                cursor: "pointer", transition: "all 0.15s",
+              }}>
                 ⦾ Kamera Langsung
-                <span style={{ display: "block", fontSize: "9px", fontWeight: 400, opacity: 0.6, marginTop: "2px" }}>Skor autentisitas +bonus</span>
+                <span style={{ display: "block", fontSize: 9, fontWeight: 400, opacity: 0.6, marginTop: 2 }}>+bonus autentisitas</span>
               </button>
-              {/* Gallery Upload */}
-              <button type="button" onClick={selectGallery} disabled={busy}
-                style={{
-                  flex: 1, padding: "11px 10px", borderRadius: "10px",
-                  background: captureMode === "gallery" ? "rgba(255,189,89,0.07)" : "rgba(255,255,255,0.03)",
-                  border: `1px solid ${captureMode === "gallery" ? "rgba(255,189,89,0.3)" : "rgba(255,255,255,0.08)"}`,
-                  color: captureMode === "gallery" ? "#ffbd59" : "rgba(255,255,255,0.4)",
-                  fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: "12px", fontWeight: 600,
-                  cursor: "pointer", transition: "all 0.15s", position: "relative" as const,
-                }}>
-                ◫ Upload Galeri
-                <span style={{
-                  display: "block", fontSize: "9px", fontWeight: 400,
-                  opacity: 0.6, marginTop: "2px", color: "rgba(255,189,89,0.7)",
-                }}>Skor autentisitas −15%</span>
+              <button type="button" onClick={selectGallery} disabled={busy} style={{
+                flex: 1, padding: "12px 10px", borderRadius: 10,
+                background: captureMode === "gallery" ? "rgba(255,189,89,0.07)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${captureMode === "gallery" ? "rgba(255,189,89,0.3)" : "rgba(255,255,255,0.07)"}`,
+                color: captureMode === "gallery" ? "#ffbd59" : "rgba(255,255,255,0.35)",
+                fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: 12, fontWeight: 600,
+                cursor: "pointer", transition: "all 0.15s",
+              }}>
+                ◫ Galeri
+                <span style={{ display: "block", fontSize: 9, fontWeight: 400, opacity: 0.6, marginTop: 2, color: "rgba(255,189,89,0.6)" }}>−15% autentisitas</span>
               </button>
             </div>
           </div>
 
-
-          {/* Live Camera Stream */}
+          {/* Camera stream */}
           {cameraActive && (
             <div style={{ padding: "0 16px 16px" }}>
-              <div style={{
-                position: "relative" as const, borderRadius: "12px", overflow: "hidden", background: "#000",
-                boxShadow: "0 0 0 3px rgba(124,106,255,0.2), 0 0 24px rgba(124,106,255,0.15)",
-                animation: "pulse 2.5s infinite"
-              }}>
-                <video ref={videoRef} autoPlay playsInline muted
-                  style={{ width: "100%", display: "block", maxHeight: "260px", objectFit: "cover" }} />
-                <div style={{
-                  position: "absolute" as const, bottom: "10px", left: "50%",
-                  transform: "translateX(-50%)", display: "flex", gap: "10px",
-                }}>
-                  <button type="button" onClick={capturePhoto}
-                    style={{
-                      padding: "10px 24px", borderRadius: "50px", border: "none",
-                      background: "linear-gradient(135deg,#00dfb2,#7c6aff)",
-                      fontFamily: "'Plus Jakarta Sans',sans-serif",
-                      fontWeight: 800, fontSize: "13px", color: "#0a0510",
-                      cursor: "pointer", boxShadow: "0 4px 16px rgba(0,223,178,0.4)",
-                    }}>⦾ Ambil Foto</button>
-                  <button type="button" onClick={() => { stopCamera(); setCaptureMode(null); }}
-                    style={{
-                      padding: "10px 16px", borderRadius: "50px", border: "1px solid rgba(255,80,80,0.3)",
-                      background: "rgba(255,80,80,0.07)",
-                      fontFamily: "'Plus Jakarta Sans',sans-serif",
-                      fontWeight: 600, fontSize: "12px", color: "rgba(255,120,120,0.8)",
-                      cursor: "pointer",
-                    }}>✕ Batal</button>
+              <div style={{ position: "relative" as const, borderRadius: 12, overflow: "hidden", background: "#000", boxShadow: "0 0 0 2px rgba(0,223,178,0.2)" }}>
+                <video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", display: "block", maxHeight: 240, objectFit: "cover" }} />
+                <div style={{ position: "absolute" as const, bottom: 10, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8 }}>
+                  <button type="button" onClick={capturePhoto} style={{ padding: "9px 22px", borderRadius: 50, border: "none", background: "linear-gradient(135deg,#00dfb2,#7c6aff)", fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 800, fontSize: 13, color: "#0a0510", cursor: "pointer" }}>⦾ Ambil</button>
+                  <button type="button" onClick={() => { stopCamera(); setCaptureMode(null); }} style={{ padding: "9px 14px", borderRadius: 50, border: "1px solid rgba(255,80,80,0.3)", background: "rgba(255,80,80,0.07)", fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 600, fontSize: 12, color: "rgba(255,120,120,0.8)", cursor: "pointer" }}>✕</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Captured / Selected file preview */}
-          {file && !cameraActive && (
+          {/* Preview */}
+          {file && !cameraActive && previewUrl && file.type.startsWith("image/") && (
             <div style={{ padding: "0 16px 16px" }}>
-              {/* Thumbnail */}
-              {previewUrl && file.type.startsWith("image/") && (
-                <div style={{
-                  position: "relative", borderRadius: "12px", overflow: "hidden",
-                  marginBottom: "10px",
-                  border: `1px solid ${captureMode === "camera" ? "rgba(0,223,178,0.2)" : "rgba(255,189,89,0.2)"
-                    }`,
-                }}>
-                  <img
-                    src={previewUrl}
-                    alt="Evidence preview"
-                    style={{ width: "100%", maxHeight: "260px", objectFit: "cover", display: "block" }}
-                  />
-                  {/* Source badge overlay */}
-                  <div style={{
-                    position: "absolute", top: "10px", left: "10px",
-                    padding: "4px 10px", borderRadius: "20px",
-                    background: captureMode === "camera"
-                      ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.55)",
-                    backdropFilter: "blur(8px)",
-                    border: `1px solid ${captureMode === "camera" ? "rgba(0,223,178,0.4)" : "rgba(255,189,89,0.4)"
-                      }`,
-                    fontSize: "10px", fontWeight: 700,
-                    fontFamily: "'JetBrains Mono',monospace",
-                    color: captureMode === "camera" ? "#00dfb2" : "#ffbd59",
-                    letterSpacing: "0.06em",
-                  }}>
-                    {captureMode === "camera" ? "✓ LIVE CAPTURE" : "◫ GALERI"}
-                  </div>
+              <div style={{ position: "relative" as const, borderRadius: 12, overflow: "hidden", border: `1px solid ${captureMode === "camera" ? "rgba(0,223,178,0.2)" : "rgba(255,189,89,0.2)"}` }}>
+                <img src={previewUrl} alt="Evidence" style={{ width: "100%", maxHeight: 220, objectFit: "cover", display: "block" }} />
+                <div style={{ position: "absolute" as const, top: 8, left: 8, padding: "3px 8px", borderRadius: 20, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", border: `1px solid ${captureMode === "camera" ? "rgba(0,223,178,0.4)" : "rgba(255,189,89,0.4)"}`, fontSize: 9, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace", color: captureMode === "camera" ? "#00dfb2" : "#ffbd59", letterSpacing: "0.08em" }}>
+                  {captureMode === "camera" ? "✓ LIVE CAPTURE" : "◫ GALERI"}
                 </div>
-              )}
-              {/* File meta row */}
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{
-                    fontFamily: "'Plus Jakarta Sans',sans-serif", fontWeight: 700, fontSize: "12px",
-                    background: captureMode === "camera"
-                      ? "linear-gradient(90deg,#00dfb2,#7c6aff)"
-                      : "linear-gradient(90deg,#ffbd59,#ff9f43)",
-                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
-                  }}>{file.name}</p>
-                  <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.25)", marginTop: "2px" }}>
-                    {(file.size / 1024).toFixed(1)} KB
-                    {" · "}
-                    {captureMode === "camera" ? "Bonus autentisitas aktif" : "Skor dikurangi 15%"}
-                  </p>
-                </div>
-                <button type="button" onClick={() => { setFile(null); setCaptureMode(null) }}
-                  style={{
-                    padding: "5px 10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)",
-                    background: "transparent", color: "rgba(255,255,255,0.3)",
-                    fontSize: "11px", cursor: "pointer", flexShrink: 0,
-                  }}>Ganti</button>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'JetBrains Mono',monospace" }}>{(file.size/1024).toFixed(1)} KB</p>
+                <button type="button" onClick={() => { setFile(null); setCaptureMode(null); }} style={{ padding: "4px 10px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "rgba(255,255,255,0.3)", fontSize: 11, cursor: "pointer" }}>Ganti</button>
               </div>
             </div>
           )}
 
           {!file && !cameraActive && (
-            <div style={{ padding: "24px 22px", textAlign: "center" as const, opacity: 0.4 }}>
-              <div style={{ width: 24, height: 24, margin: "0 auto 6px", border: "2px dashed rgba(255,255,255,0.4)", borderRadius: 4 }}></div>
-              <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>Pilih kamera atau galeri di atas</p>
+            <div style={{ padding: "20px 22px", textAlign: "center" as const, opacity: 0.35 }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Pilih kamera atau galeri di atas</p>
             </div>
           )}
 
-          {/* Hidden gallery input */}
           <input ref={fileRef} type="file" accept="image/*,video/*" style={{ display: "none" }}
             onChange={e => {
               const f = e.target.files?.[0];
@@ -902,66 +656,85 @@ export default function SubmitImpactForm() {
                 setFile(f); setError("");
               }
             }} />
-          {/* Hidden canvas for camera snapshot */}
           <canvas ref={canvasRef} style={{ display: "none" }} />
+        </div>
+
+        {/* GPS */}
+        <div style={{ ...glassCard, padding: "16px 22px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <span style={{ ...monoLabel, display: "block", marginBottom: 4 }}>GPS Lokasi</span>
+              <p style={{ fontSize: 11, color: gps.latitude ? "rgba(0,223,178,0.6)" : "rgba(255,255,255,0.2)", fontFamily: "'JetBrains Mono',monospace" }}>
+                {gps.latitude ? `${gps.latitude.toFixed(4)}, ${gps.longitude.toFixed(4)}` : "Belum diset"}
+              </p>
+            </div>
+            <button type="button"
+              onClick={() => navigator.geolocation.getCurrentPosition(
+                p => setGps({ latitude: p.coords.latitude, longitude: p.coords.longitude }),
+                () => setError("Tidak bisa mendapatkan lokasi.")
+              )}
+              style={{ padding: "9px 14px", borderRadius: 9, background: "rgba(0,223,178,0.06)", border: "1px solid rgba(0,223,178,0.15)", fontFamily: "'Plus Jakarta Sans',sans-serif", fontSize: 12, color: "#00dfb2", cursor: "pointer", fontWeight: 600 }}>
+              ⌖ Deteksi
+            </button>
+          </div>
         </div>
 
         {/* Error */}
         {error && (
-          <div style={{
-            padding: "12px 16px", borderRadius: "10px",
-            background: "rgba(255,80,80,0.05)", border: "1px solid rgba(255,80,80,0.15)",
-            fontFamily: "'JetBrains Mono',monospace",
-            fontSize: "11px", color: "rgba(255,120,120,0.85)", lineHeight: 1.5,
-          }}>
+          <div style={{ padding: "12px 16px", borderRadius: 10, background: "rgba(255,80,80,0.05)", border: "1px solid rgba(255,80,80,0.15)", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "rgba(255,120,120,0.85)", lineHeight: 1.5 }}>
             ✕ {error}
           </div>
         )}
 
-        {/* T&C Warning */}
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: "10px", padding: "12px",
-          background: "rgba(255,255,255,0.02)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.05)"
-        }}>
-          <input
-            type="checkbox"
-            id="tnc"
-            checked={termsAccepted}
-            onChange={(e) => setTermsAccepted(e.target.checked)}
-            style={{ marginTop: "4px", accentColor: "#7c6aff", width: "16px", height: "16px", cursor: "pointer" }}
-          />
-          <label htmlFor="tnc" style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.5, cursor: "pointer", userSelect: "none" }}>
-            Saya bersumpah data ini <strong>asli dan jujur</strong>. Saya mengerti bahwa memanipulasi bukti (Photoshop, hapus EXIF, lokasi palsu) akan melukai komunitas dan
-            <span style={{ color: "rgba(255,80,80,0.8)" }}> dapat mengakibatkan PEMBLOKIRAN PERMANEN (Auto-Ban)</span> pada akun saya dari seluruh platform APEX.
+        {/* Terms */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, background: "rgba(255,255,255,0.015)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.05)" }}>
+          <input type="checkbox" id="tnc" checked={termsAccepted} onChange={e => setTermsAccepted(e.target.checked)} style={{ marginTop: 3, accentColor: "#7c6aff", width: 15, height: 15, cursor: "pointer", flexShrink: 0 }} />
+          <label htmlFor="tnc" style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5, cursor: "pointer", userSelect: "none" as const }}>
+            Saya bersumpah foto dan deskripsi ini <strong>asli dan jujur</strong>. Saya mengerti bahwa manipulasi data dapat mengakibatkan{" "}
+            <span style={{ color: "rgba(255,80,80,0.8)" }}>PEMBLOKIRAN PERMANEN</span> dari platform APEX.
           </label>
         </div>
 
         {/* Submit */}
-        <button type="submit" disabled={busy || !form.description || !termsAccepted}
+        <button type="submit" disabled={!canSubmit}
           style={{
-            width: "100%", padding: "15px", borderRadius: "12px", border: "none",
-            background: busy || !form.description || !termsAccepted
-              ? "rgba(255,255,255,0.04)"
-              : "linear-gradient(135deg,#00dfb2,#7c6aff)",
+            width: "100%", padding: 16, borderRadius: 13, border: "none",
+            background: canSubmit ? "linear-gradient(135deg,#00dfb2,#7c6aff)" : "rgba(255,255,255,0.04)",
             fontFamily: "'Plus Jakarta Sans',sans-serif",
-            fontSize: "14px", fontWeight: 800,
-            color: busy || !form.description || !termsAccepted ? "rgba(255,255,255,0.2)" : "#0a0510",
-            cursor: busy || !form.description || !termsAccepted ? "not-allowed" : "pointer",
-            transition: "all 0.2s", letterSpacing: "0.02em",
-            boxShadow: busy || !form.description || !termsAccepted ? "none" : "0 4px 24px rgba(0,223,178,0.3)",
+            fontSize: 14, fontWeight: 800,
+            color: canSubmit ? "#0a0510" : "rgba(255,255,255,0.15)",
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            transition: "all 0.2s",
+            boxShadow: canSubmit ? "0 4px 24px rgba(0,223,178,0.28)" : "none",
+            letterSpacing: "0.02em",
           }}
-          onMouseEnter={e => { if (!busy && form.description && termsAccepted) (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
+          onMouseEnter={e => { if (canSubmit) (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0)"; }}
         >
-          ✦ Submit Impact Proof
+          ✦ Submit Impact Proof — AI akan menganalisis fotomu
         </button>
+
+        {/* Disclaimer */}
+        <p style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", textAlign: "center" as const, fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.7 }}>
+          Tidak ada slider. Tidak ada pilihan manual.<br />
+          YOLOv8m + LLaVA menyimpulkan semua parameter secara objektif.
+        </p>
       </form>
 
       <style>{`
         @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes shimmer { 0%{background-position:0% 0%} 100%{background-position:200% 0%} }
-        @keyframes pulse { 0%{box-shadow:0 0 0 2px rgba(124,106,255,0.1),0 0 10px rgba(124,106,255,0.05)} 50%{box-shadow:0 0 0 4px rgba(124,106,255,0.3),0 0 28px rgba(124,106,255,0.3)} 100%{box-shadow:0 0 0 2px rgba(124,106,255,0.1),0 0 10px rgba(124,106,255,0.05)} }
       `}</style>
+    </div>
+  );
+}
+
+// ── Sub-component: AI Deduction row ──────────────────────────────────────────
+function AIDeductedRow({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'JetBrains Mono',monospace", color: color || "rgba(255,255,255,0.7)" }}>{value}</span>
     </div>
   );
 }

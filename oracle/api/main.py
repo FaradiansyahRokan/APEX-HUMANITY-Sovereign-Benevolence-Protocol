@@ -747,10 +747,10 @@ async def oracle_info(_: str = Depends(verify_api_key)) -> Dict[str, Any]:
             "perceptual_hash_sybil",
             "exif_timestamp_validation",
             "ela_manipulation_detection",
-            "llava_parameter_deduction",       
-            "yolo_person_count_reconciliation",
-            "ai_deduction_fraud_indicators",    
-            "reward_gate_hard_threshold",       
-            "token_reward_from_adjusted_score", 
+            "llava_parameter_deduction",        # NEW v2.0
+            "yolo_person_count_reconciliation", # NEW v2.0
+            "ai_deduction_fraud_indicators",    # NEW v2.0
+            "reward_gate_hard_threshold",       # NEW v2.0 FIX
+            "token_reward_from_adjusted_score", # NEW v2.0 FIX
         ],
     }

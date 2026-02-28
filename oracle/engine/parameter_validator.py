@@ -338,7 +338,7 @@ class ParameterValidator:
 
         return result
 
-    # Legacy method — kept for backward compat, delegates to AI deduction
+    
     def validate(
         self,
         action_type:       str,
@@ -355,7 +355,7 @@ class ParameterValidator:
         is not available (e.g., text-only submissions without image).
         """
         result = ValidationResult(passed=True)
-        # Text-only: minimal validation, trust description
+        
         if not image_bytes:
             result.llm_verdict = "text_only"
             return result
