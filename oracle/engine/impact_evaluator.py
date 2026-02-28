@@ -279,17 +279,22 @@ class ComputerVisionVerifier:
             logger.warning(f"[CV] Image resize failed: {e} — using original")
             return image_bytes
 
-    def verify_image_from_bytes(self, image_bytes: bytes) -> dict[str, Any]:
+    def verify_image_from_bytes(self, image_bytes: bytes) -> dict:
+        """
+        v1.3.0: Returns person_count (raw count, not deduplicated) in addition
+        to existing fields. Used by ParameterValidator for YOLO triangulation.
+        """
         try:
-            # v1.2.0: resize before inference to cap bandwidth + processing time
-            image_bytes = self._resize_image_bytes(image_bytes)
-            img = Image.open(io.BytesIO(image_bytes))
+            from PIL import Image
+            import io
 
-            # Use GPU if available (device=0), else CPU
-            results = self.model.predict(source=img, conf=0.25, device=0)
+            image_bytes     = self._resize_image_bytes(image_bytes)
+            img             = Image.open(io.BytesIO(image_bytes))
+            results         = self.model.predict(source=img, conf=0.25, device=0)
 
-            detected_objects  = []
-            confidence_sum    = 0.0
+            detected_objects = []
+            person_boxes     = []       # ← NEW: track individual person detections
+            confidence_sum   = 0.0
 
             for result in results:
                 for box in result.boxes:
@@ -299,23 +304,47 @@ class ComputerVisionVerifier:
                     detected_objects.append(label)
                     confidence_sum += conf
 
-            has_person    = "person" in detected_objects
-            ai_confidence = 0.0
+                    # ← NEW: count each person box separately
+                    if label == "person":
+                        person_boxes.append({
+                            "conf": round(conf, 3),
+                            "xyxy": [round(float(x), 1) for x in box.xyxy[0].tolist()],
+                        })
 
+            has_person    = len(person_boxes) > 0
+            ai_confidence = 0.0
             if detected_objects:
-                base_conf     = confidence_sum / len(detected_objects)
-                ai_confidence = base_conf
+                ai_confidence = confidence_sum / len(detected_objects)
+
+            import logging
+            logger = logging.getLogger("satin.oracle")
+            logger.info(
+                f"[CV] confidence={ai_confidence:.2%} "
+                f"objects={list(set(detected_objects))} "
+                f"person_count={len(person_boxes)}"  # ← NEW log
+            )
 
             return {
                 "confidence":              round(ai_confidence, 4),
                 "detected_objects":        list(set(detected_objects)),
                 "found_human_interaction": has_person,
+                "person_count":            len(person_boxes),   # ← NEW: raw count for triangulation
+                "person_boxes":            person_boxes,         # ← NEW: for debugging/audit
                 "model":                   "YOLOv8n-RealTime",
             }
 
         except Exception as e:
-            logger.error(f"Real CV verification failed: {e}")
-            return {"confidence": 0.0, "error": str(e)}
+            import logging
+            logging.getLogger("satin.oracle").error(f"CV verification failed: {e}")
+            return {
+                "confidence":              0.0,
+                "detected_objects":        [],
+                "found_human_interaction": False,
+                "person_count":            0,      # ← NEW: default 0 on error
+                "person_boxes":            [],
+                "error":                   str(e),
+            }
+
 
 
 class GPSAuthenticityChecker:

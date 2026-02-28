@@ -15,18 +15,26 @@ Instead of mining blocks with graphics cards, APEX Humanity "mines" tokens throu
 ### 2. SATIN Oracle — AI-Powered Verification
 SATIN (Sovereign Autonomous Trust & Impact Network) is our custom Python-based AI Oracle. When you submit a photo of your good deed, SATIN runs it through a **CV Object Detection Engine (YOLOv8)** to confirm what the image portrays (e.g., detecting food, water, medical supplies). It independently calculates an **Impact Score** which dictates how many **APEX Tokens** you receive.
 
-### 3. Fortified Anti-Fraud Engine 
-To guarantee that nobody can "cheat" the system, we built a multi-layered verification firewall:
-- **Challenge Nonce System:** Before uploading, the Oracle generates a unique cryptographic nonce. The photo *must* be uploaded during the 5-minute validity window of this nonce, preventing replay attacks.
-- **EXIF Metadata Authentication:** The Oracle extracts EXIF data from the photo. It checks the **Timestamp** (rejecting photos older than 24 hours) and calculates the Haversine distance between the photo's **GPS coordinates** and the location you claim to be at. If they don't match, you lose your score!
-- **ELA (Error Level Analysis):** A digital forensics module detects if an image has been manipulated (e.g., Photoshopped) by analyzing compression inconsistencies.
-- **Live Camera Bonus:** The frontend integrates a direct WebRTC camera module. Taking a photo *Live* via the dApp earns you a bonus score compared to uploading from the gallery.
+### 3. Fortified Anti-Fraud Engine (SATIN Perimeter Integrity Firewall)
+To guarantee that nobody can "cheat" the system, we built the **SATIN Perimeter Integrity Firewall** — a multi-dimensional, 6-layer defense system that makes data manipulation nearly impossible:
+
+| Layer | Name | Security Mechanism |
+| :--- | :--- | :--- |
+| **Layer 1** | **Digital Forensics** | **EXIF Auth:** Rejects photos without GPS/Timestamp metadata (Screenshots/Downloads). **ELA Analysis:** Detects Photoshop/Clone-tool edits via compression variance. |
+| **Layer 2** | **Logic Constraint Matrix** | **Physical Hard-Caps:** Rejects impossible claims (e.g., 5000 people helped in 1 hour). Cross-validates Action Types vs Urgency Levels. |
+| **Layer 3** | **CV Triangulation** | **YOLOv8 Object Detection:** Counts visible humans. If you claim 500 helped but YOLO sees 0 people in the photo → **High Risk Penalty**. |
+| **Layer 4** | **Semantic NLP Audit** | **Keyword Analysis:** Ensures descriptions match action types (e.g., "Food Distribution" must contain food-related keywords). |
+| **Layer 5** | **AI Consistency Auditor** | **LLM Cross-Validator (Anthropic Haiku):** AI reads your entire description and cross-matches it against your claimed numbers for logical contradictions. |
+| **Layer 6** | **The Punisher (Clamping)** | **Adaptive Penalties:** Any high-risk flag triggers **Hard Clamping**, forcing your rewards to the absolute minimum and routing you for strict **Champion-Only Audit**. |
+
+> [!IMPORTANT]
+> **Anti-Manipulation Streak:** The system tracks manipulation attempts. 3 failed attempts in a row will result in an **Auto-Ban** of the wallet address from the APEX ecosystem.
 
 ### 4. Decentralized Community Voting 
-What happens if the AI Oracle is unsure (Confidence Score < 30%)? The submission is sent to the **Community Stream**.
-- **Phase 1 (First 10 mins):** Only highly trusted users (Rank **CHAMPION** or above, Reputation Score > 500) can vote to Approve or Reject the proof.
-- **Phase 2:** Voting opens to all verified volunteers.
-- **Fairness Logic:** Once a Quorum (3 votes) approves the submission, the volunteer is guaranteed a minimum payout (~12.4 APEX) signed securely by the Oracle. *Anti-abuse rule: You cannot vote on your own submission, nor submit new ones while another is pending community review!*
+What happens if the AI Oracle is unsure or flags a submission as suspicious? It's sent to the **Community Stream**.
+- **Tier 1 (High Risk):** Submissions flagged as "High Risk" (missing EXIF, suspicious objects) require a **CHAMPION+ Audit**. Only top-reputation users can vote.
+- **Tier 2 (Standard):** Low-confidence but clean submissions are open to all volunteers.
+- **Slashing Logic:** If the community rejects a fraud attempt, any pending rewards are burned. Repeated rejections lead to reputation slashing.
 
 ### 5. On-Chain Reputation & Rank System
 The *ReputationLedger.sol* smart contract tracks your cumulative impact. As you do good deeds, you "level up" through ranks: `INITIATE` ➔ `NOVICE` ➔ `CHAMPION` ➔ `LUMINARY` ➔ `APEX`. Your rank unlocks voting privileges and social proof.
