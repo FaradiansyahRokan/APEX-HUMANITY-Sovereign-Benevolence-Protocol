@@ -7,9 +7,8 @@ import { BENEVOLENCE_VAULT_ABI } from "../utils/abis";
 import { CONTRACTS, ACTION_TYPES, URGENCY_LEVELS } from "../utils/constants";
 
 const getOracleUrl = () => {
-  if (typeof window === "undefined") return process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
-  const host = window.location.hostname;
-  return `http://${host}:8000`;
+  // Langsung ambil dari .env tanpa menebak hostname
+  return process.env.NEXT_PUBLIC_ORACLE_URL || "http://localhost:8000";
 };
 
 const ORACLE_URL = getOracleUrl();
