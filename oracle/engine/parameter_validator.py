@@ -94,19 +94,19 @@ YOLO Computer Vision mendeteksi:
 - Objek yang terdeteksi: {detected_objects}
 """
             prompt = f"""Kamu adalah sistem AI analisis dampak sosial bernama SATIN Vision.
-Tugasmu adalah menganalisis foto kegiatan sosial dan mendeduski parameter objektif dari visual dan deskripsi.
+Tugasmu adalah menganalisis foto kegiatan sosial (termasuk tindakan kebaikan kecil sehari-hari seperti memberi makan 1 orang di jalan) dan mendeduski parameter objektif dari visual dan deskripsi.
 
 DESKRIPSI DARI RELAWAN: "{description}"
 
 {yolo_context if image_bytes else ""}
 
 Tugas: Analisis secara objektif dan deduksi parameter berikut HANYA dari bukti visual dan deskripsi.
-JANGAN percaya klaim angka dari user — simpulkan sendiri dari yang kamu lihat dan baca.
+JANGAN percaya klaim angka hiperbolis dari user, tapi hargai tindakan nyata sekecil apapun (misal membantu 1 orang = valid).
 
 Jawab HANYA dalam JSON murni (tanpa markdown, tanpa penjelasan di luar JSON):
 {{
-  "action_type": "FOOD_DISTRIBUTION|MEDICAL_AID|SHELTER_CONSTRUCTION|EDUCATION_SESSION|DISASTER_RELIEF|CLEAN_WATER_PROJECT|MENTAL_HEALTH_SUPPORT|ENVIRONMENTAL_ACTION",
-  "urgency_level": "LOW|MEDIUM|HIGH|CRITICAL",
+  "action_type": "<pilih TEPAT SATU dari: FOOD_DISTRIBUTION, MEDICAL_AID, SHELTER_CONSTRUCTION, EDUCATION_SESSION, DISASTER_RELIEF, CLEAN_WATER_PROJECT, MENTAL_HEALTH_SUPPORT, ENVIRONMENTAL_ACTION>",
+  "urgency_level": "<pilih TEPAT SATU dari: LOW, MEDIUM, HIGH, CRITICAL>",
   "scene_context": "deskripsi singkat situasi yang kamu lihat di foto (max 50 kata)",
   "people_helped_estimate": {{
     "visible_in_photo": <integer dari foto>,
@@ -120,11 +120,12 @@ Jawab HANYA dalam JSON murni (tanpa markdown, tanpa penjelasan di luar JSON):
     "best_estimate": <float — nilaimu yang paling masuk akal>
   }},
   "confidence": <integer 0-100>,
-  "fraud_indicators": ["isi HANYA jika ada penipuan/manipulasi (misal foto di kafe tapi klaim bencana alam). JANGAN isi jika sekadar jumlah kurang tampak. Kosongkan [] jika foto aman dan nyambung"],
+  "fraud_indicators": ["isi HANYA jika ada manipulasi. Kosongkan [] jika foto aman. Tindakan kecil individu BUKAN fraud"],
   "reasoning": "penjelasan singkat deduksimu"
 }}
 
 Contoh:
+- Jika foto memberi bungkus nasi ke 1 pengemis di jalan → action_type = FOOD_DISTRIBUTION, urgency = MEDIUM, people = 1
 - Jika foto ada 3 orang tapi konteks dapur umum besar → people bisa 50-200
 - Jika foto cuma selfie + caption "membantu 1000 orang" → estimate 1-5
 - Kegiatan pembagian nasi di tenda → FOOD_DISTRIBUTION HIGH

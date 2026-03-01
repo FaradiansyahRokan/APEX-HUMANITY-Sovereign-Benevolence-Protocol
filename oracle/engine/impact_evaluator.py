@@ -17,10 +17,12 @@ Fixes:
 from __future__ import annotations
 
 class EvaluationFailedError(RuntimeError):
-    def __init__(self, message: str, impact_score: float, ai_confidence: float):
+    def __init__(self, message: str, impact_score: float, ai_confidence: float, token_reward: float = 0.0):
         super().__init__(message)
         self.impact_score = impact_score
         self.ai_confidence = ai_confidence
+        self.token_reward = token_reward
+
 
 import hashlib
 import hmac
@@ -1138,10 +1140,18 @@ def _evaluate_evidence_bundle(
     result: ImpactMetadata = evaluator_instance._evaluate_internal(metadata, image_bytes, penalty)
 
     if result.verification_status != VerificationStatus.VERIFIED:
+        # Calculate theoretical reward for community stream
+        score_normalized = result.impact_score / 100.0
+        theoretical_reward = 5.0 + (score_normalized ** 1.5) * 45.0
+        theoretical_reward = min(theoretical_reward, evaluator_instance.score_calculator.MAX_TOKEN_REWARD_APEX)
+        if penalty >= 0.60:
+            theoretical_reward = 0.0
+
         raise EvaluationFailedError(
             f"Insufficient impact: {result.rejection_reason or result.verification_status.value}",
             result.impact_score,
-            result.ai_confidence
+            result.ai_confidence,
+            theoretical_reward
         )
 
     sig_data = json.loads(result.oracle_signature)

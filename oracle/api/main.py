@@ -207,8 +207,13 @@ def _build_community_claim_payload(stream_entry: dict) -> tuple[dict, dict]:
     from web3 import Web3
     event_id       = stream_entry["event_id"]
     volunteer_addr = stream_entry["volunteer_address"]
-    impact_score   = COMMUNITY_CLAIM_IMPACT_SCORE
-    token_reward   = COMMUNITY_CLAIM_TOKEN_REWARD
+    # BUMP the score to exactly 30.0 if it was lower, otherwise the Smart Contract 
+    # will revert with ScoreBelowMinimum (since it demands at least 3000 scaled).
+    impact_score   = stream_entry.get("impact_score", COMMUNITY_CLAIM_IMPACT_SCORE)
+    if impact_score < COMMUNITY_CLAIM_IMPACT_SCORE:
+        impact_score = COMMUNITY_CLAIM_IMPACT_SCORE
+        
+    token_reward   = stream_entry.get("token_reward", COMMUNITY_CLAIM_TOKEN_REWARD)
     impact_scaled  = int(impact_score * 100)
     token_reward_wei = int(token_reward * 10 ** 18)
     now        = int(time.time())
@@ -464,7 +469,7 @@ async def verify_impact(
             "people_helped":          deduction.final_people_helped,
             "impact_score":           round(eval_err.impact_score, 2),
             "ai_confidence":          round(eval_err.ai_confidence, 4),
-            "token_reward":           0.0,
+            "token_reward":           round(eval_err.token_reward, 4),
             "source":                 source,
             "image_base64":           body.image_base64,
             "integrity_warnings":     integrity_warnings + ["impact_below_threshold"],
@@ -475,7 +480,9 @@ async def verify_impact(
                 "effort_hours":   deduction.final_effort_hours,
                 "confidence":     deduction.confidence,
                 "scene_context":  deduction.scene_context,
+                "yolo_person_count": deduction.yolo_person_count,
                 "fraud_indicators": deduction.fraud_indicators,
+                "reasoning":        deduction.reasoning,
             },
             "needs_community_review": True,
             "needs_champion_audit":   is_high_risk or deduction.urgency_level == "CRITICAL",
@@ -494,7 +501,7 @@ async def verify_impact(
             "event_id":               event_id,
             "impact_score":           round(eval_err.impact_score, 2),
             "ai_confidence":          round(eval_err.ai_confidence, 4),
-            "token_reward":           0.0,
+            "token_reward":           round(eval_err.token_reward, 4),
             "integrity_warnings":     low_score_entry["integrity_warnings"],
             "authenticity_penalty":   total_penalty,
             "ai_deduced":             low_score_entry["ai_deduced"],
